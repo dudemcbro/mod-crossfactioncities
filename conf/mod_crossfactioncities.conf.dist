@@ -1,0 +1,46 @@
+#
+# mod-crossfactioncities
+#
+
+CrossFactionCities.Enable = 1
+
+# If enabled, only apply neutrality in areas flagged as capital/city/town in AreaTable.dbc.
+CrossFactionCities.OnlyInCities = 1
+
+# If enabled, automatically treat creatures flagged as guards as eligible for neutrality.
+CrossFactionCities.IncludeGuards = 1
+
+# If enabled, any creature with Alliance/Horde faction group is eligible within cities.
+# This fills gaps when new faction templates are added later.
+CrossFactionCities.UseFactionGroup = 1
+
+# FactionTemplate ID to send to clients for opposing city NPCs.
+# 0 = use the player's own faction template (guarantees no hostile sword icon).
+CrossFactionCities.ClientFactionTemplateId = 0
+
+# Neutralize opposing-faction players (no PvP except duels), to allow normal interaction.
+CrossFactionCities.PlayerNeutral = 1
+
+# If enabled, only neutralize opposing players in city areas.
+CrossFactionCities.PlayerNeutralOnlyInCities = 0
+
+# Allow interacting with mailbox NPCs from the opposing faction.
+CrossFactionCities.NeutralMailboxes = 1
+
+# If enabled, mailbox NPCs ignore the city-only restriction.
+CrossFactionCities.MailboxIgnoreCityCheck = 1
+
+# Additional zone IDs to treat as neutral interaction areas.
+# Defaults include all playable race starting zones from playercreateinfo.sql.
+CrossFactionCities.NeutralZoneIds = "1,12,14,85,141,215,3431,3526"
+
+# Additional area IDs to treat as neutral interaction areas.
+CrossFactionCities.NeutralAreaIds = ""
+
+# Comma-separated creature_template.faction (FactionTemplate ID) values for opposing-faction city NPCs.
+# Populate these lists with the faction IDs used by civilian/quest/vendor/trainers in the opposing cities.
+CrossFactionCities.AllianceCityFactionIds = ""
+CrossFactionCities.HordeCityFactionIds = ""
+
+# Optional guard/defender faction template IDs (FactionTemplate ID), if guards use a separate faction.
+CrossFactionCities.GuardFactionIds = ""

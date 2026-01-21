@@ -1,0 +1,65 @@
+diff --git a/src/server/game/Entities/GameObject/GameObject.cpp b/src/server/game/Entities/GameObject/GameObject.cpp
+index aa07590f6..2df061801 100644
+--- a/src/server/game/Entities/GameObject/GameObject.cpp
++++ b/src/server/game/Entities/GameObject/GameObject.cpp
+@@ -2819,6 +2819,12 @@ void GameObject::BuildValuesUpdate(uint8 updateType, ByteBuffer* data, Player* t
+ 
+                 fieldBuffer << goFlags;
+             }
++            else if (index == GAMEOBJECT_FACTION)
++            {
++                uint32 faction = m_uint32Values[index];
++                sScriptMgr->OnGameObjectFactionCalc(this, target, faction);
++                fieldBuffer << faction;
++            }
+             else
+                 fieldBuffer << m_uint32Values[index];                // other cases
+         }
+diff --git a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp b/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp
+index 2a1f09d67..5f9aa3558 100644
+--- a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp
+@@ -49,6 +49,17 @@ void ScriptMgr::OnGameObjectSaveToDB(GameObject* go)
+     });
+ }
+ 
++void ScriptMgr::OnGameObjectFactionCalc(GameObject const* go, Player const* viewer, uint32& faction)
++{
++    if (!go || !viewer)
++        return;
++
++    ExecuteScript<AllGameObjectScript>([&](AllGameObjectScript* script)
++    {
++        script->OnGameObjectFactionCalc(go, viewer, faction);
++    });
++}
++
+ AllGameObjectScript::AllGameObjectScript(const char* name) :
+     ScriptObject(name)
+ {
+diff --git a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h b/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h
+index 496bc5300..f68b535a3 100644
+--- a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h
++++ b/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h
+@@ -82,6 +82,9 @@ public:
+     // Called when the game object state is changed.
+     virtual void OnGameObjectStateChanged(GameObject* /*go*/, uint32 /*state*/) { }
+ 
++    // Called when a game object's faction update is built for a viewer.
++    virtual void OnGameObjectFactionCalc(GameObject const* /*go*/, Player const* /*viewer*/, uint32& /*faction*/) { }
++
+     // Called when a GameObjectAI object is needed for the gameobject.
+     virtual GameObjectAI* GetGameObjectAI(GameObject* /*go*/) const { return nullptr; }
+ };
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+index e1d535007..cae316061 100644
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -258,6 +258,7 @@ public: /* GameObjectScript */
+     GameObjectAI* GetGameObjectAI(GameObject* go);
+     void OnGameObjectAddWorld(GameObject* go);
+     void OnGameObjectRemoveWorld(GameObject* go);
++    void OnGameObjectFactionCalc(GameObject const* go, Player const* viewer, uint32& faction);
+ 
+ public: /* AreaTriggerScript */
+     bool OnAreaTrigger(Player* player, AreaTrigger const* trigger);
