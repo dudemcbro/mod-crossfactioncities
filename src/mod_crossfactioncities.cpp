@@ -316,3 +316,8 @@ void Addmod_crossfactioncitiesScripts()
     new CrossFactionCities_UnitScript();
     new CrossFactionCities_AllGameObjectScript();
 }
+
+void AddCrossFactionCitiesScripts()
+{
+    Addmod_crossfactioncitiesScripts();
+}

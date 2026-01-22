@@ -1,7 +1,4 @@
-#ifndef MOD_CROSSFACTIONCITIES_LOADER_H
-#define MOD_CROSSFACTIONCITIES_LOADER_H
+#pragma once
 
-// This function is implemented in src/mod_crossfactioncities.cpp
-void AddCrossFactionCitiesScripts()
+void AddCrossFactionCitiesScripts();
 
-#endif
