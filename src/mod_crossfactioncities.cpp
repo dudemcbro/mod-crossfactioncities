@@ -6,7 +6,7 @@
 #include "GameObject.h"
 #include "Log.h"
 #include "Player.h"
-#include "UnitUtils.h"
+#include "Unit.h"
 
 #include <exception>
 #include <sstream>
