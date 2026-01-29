@@ -53,4 +53,5 @@ cp modules/mod-crossfactioncities/conf/mod_crossfactioncities.conf.dist \
 - This module does not touch reputation tables.
 - Enable `AllowTwoSide.Interaction.*` in `worldserver.conf` for cross-faction systems.
 - Add towns not flagged as cities to `NeutralZoneIds` or `NeutralAreaIds`.
+- Guard neutrality infers Alliance/Horde from faction template masks (our/friendly/hostile) to cover guards without `ourMask`.
 - Disable legacy crossfaction modules to avoid conflicts.

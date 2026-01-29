@@ -88,14 +88,44 @@ namespace
         return IsCityAreaByFlags(area) || IsCityAreaByFlags(zone);
     }
 
+    enum class FactionSide : uint8
+    {
+        Unknown,
+        Alliance,
+        Horde
+    };
+
+    FactionSide GetFactionSide(FactionTemplateEntry const* factionTemplate)
+    {
+        if (!factionTemplate)
+            return FactionSide::Unknown;
+
+        bool ourAlliance = (factionTemplate->ourMask & FACTION_MASK_ALLIANCE) != 0;
+        bool ourHorde = (factionTemplate->ourMask & FACTION_MASK_HORDE) != 0;
+        if (ourAlliance != ourHorde)
+            return ourAlliance ? FactionSide::Alliance : FactionSide::Horde;
+
+        bool friendlyAlliance = (factionTemplate->friendlyMask & FACTION_MASK_ALLIANCE) != 0;
+        bool friendlyHorde = (factionTemplate->friendlyMask & FACTION_MASK_HORDE) != 0;
+        if (friendlyAlliance != friendlyHorde)
+            return friendlyAlliance ? FactionSide::Alliance : FactionSide::Horde;
+
+        bool hostileAlliance = (factionTemplate->hostileMask & FACTION_MASK_ALLIANCE) != 0;
+        bool hostileHorde = (factionTemplate->hostileMask & FACTION_MASK_HORDE) != 0;
+        if (hostileAlliance != hostileHorde)
+            return hostileAlliance ? FactionSide::Horde : FactionSide::Alliance;
+
+        return FactionSide::Unknown;
+    }
+
     bool IsAllianceFaction(FactionTemplateEntry const* factionTemplate)
     {
-        return factionTemplate && (factionTemplate->ourMask & FACTION_MASK_ALLIANCE) != 0;
+        return GetFactionSide(factionTemplate) == FactionSide::Alliance;
     }
 
     bool IsHordeFaction(FactionTemplateEntry const* factionTemplate)
     {
-        return factionTemplate && (factionTemplate->ourMask & FACTION_MASK_HORDE) != 0;
+        return GetFactionSide(factionTemplate) == FactionSide::Horde;
     }
 
     bool ShouldForceNeutral(Player const* player, Creature const* creature)
