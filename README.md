@@ -54,4 +54,6 @@ cp modules/mod-crossfactioncities/conf/mod_crossfactioncities.conf.dist \
 - Enable `AllowTwoSide.Interaction.*` in `worldserver.conf` for cross-faction systems.
 - Add towns not flagged as cities to `NeutralZoneIds` or `NeutralAreaIds`.
 - Guard neutrality infers Alliance/Horde from faction template masks (our/friendly/hostile) to cover guards without `ourMask`.
+- If you run mod-playerbots, set no-PvP zones/areas so bots do not attack in towns/cities. Use:
+  - `AiPlayerbot.PvpProhibitedZoneIds` and `AiPlayerbot.PvpProhibitedAreaIds` in `playerbots.conf`.
 - Disable legacy crossfaction modules to avoid conflicts.
