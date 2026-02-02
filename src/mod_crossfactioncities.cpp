@@ -305,7 +305,10 @@ public:
         if (posPointers.UnitFieldFactionTemplatePos < 0)
             return;
 
-        uint32 clientFactionTemplateId = sClientFactionTemplateId ? sClientFactionTemplateId : target->GetFaction();
+        uint32 clientFactionTemplateId = sClientFactionTemplateId;
+
+        if (!clientFactionTemplateId)
+            return;
 
         if (Creature const* creature = unit->ToCreature())
         {

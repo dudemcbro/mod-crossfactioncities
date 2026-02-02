@@ -49,6 +49,10 @@ cp modules/mod-crossfactioncities/conf/mod_crossfactioncities.conf.dist \
 - CrossFactionCities.HordeCityFactionIds
 - CrossFactionCities.GuardFactionIds
 
+## Database
+- `sql/world/base/allow_crossfaction_quests.sql` (run once per server after the module is loaded) sets `quest_template.AllowableRaces = 0` for every quest so opposing-faction players can see all city quest givers and stores the previous masks in `quest_template_allowableraces_backup`.
+- If you ever need to revert to the stock race masks, run `sql/world/base/restore_crossfaction_quests.sql`. It restores `AllowableRaces` from the backup table and drops that table so you can reapply the allow-all script later.
+
 ## Notes
 - This module does not touch reputation tables.
 - Enable `AllowTwoSide.Interaction.*` in `worldserver.conf` for cross-faction systems.
