@@ -14,14 +14,21 @@ for f in "$CORE_FILE_1" "$CORE_FILE_2" "$CORE_FILE_3" "$CORE_FILE_4"; do
     echo "ERROR: $f not found. Run this from the AzerothCore repo root."
     exit 1
   fi
-done
+ done
 
-# Idempotency check: if the hook is already present, skip
-if grep -R --line-number -E "OnGameObjectFactionCalc\\(" "$CORE_FILE_1" "$CORE_FILE_2" "$CORE_FILE_3" "$CORE_FILE_4" >/dev/null 2>&1; then
-  echo "Hook already present. Skipping."
+# If the patch is already applied, reverse-check will succeed.
+if git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+  echo "OK: already applied: $(basename "$PATCH")"
   exit 0
 fi
 
-echo "Applying patch: $PATCH"
-git apply "$PATCH"
-echo "Patch applied."
+# If it is not applied yet, ensure it can be applied cleanly.
+if git apply --check "$PATCH" >/dev/null 2>&1; then
+  git apply "$PATCH"
+  echo "APPLIED: $(basename "$PATCH")"
+  exit 0
+fi
+
+echo "ERROR: cannot apply cleanly: $(basename "$PATCH")" >&2
+echo "Hint: check local core modifications: (git status && git diff)" >&2
+exit 1
