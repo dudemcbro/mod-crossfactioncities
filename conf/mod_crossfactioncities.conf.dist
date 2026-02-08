@@ -32,7 +32,7 @@ CrossFactionCities.MailboxIgnoreCityCheck = 1
 
 # Additional zone IDs to treat as neutral interaction areas.
 # Defaults include all playable race starting zones from playercreateinfo.sql.
-CrossFactionCities.NeutralZoneIds = "1,12,14,85,141,215,3431,3526"
+CrossFactionCities.NeutralZoneIds = "1,12,14,85,141,215,3430,3431,3433,3524,3525,3526"
 
 # Additional area IDs to treat as neutral interaction areas.
 CrossFactionCities.NeutralAreaIds = ""

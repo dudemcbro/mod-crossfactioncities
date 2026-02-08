@@ -73,6 +73,7 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 - `restore_crossfaction_quests.sql` is repeat safe and removes its backup table.
 
 ## Compatibility notes
+- Player-owned pets, guardians, and charmed units inherit the owner's neutrality checks (guards should not aggro when a pet is summoned).
 - This module does not modify client data (no DBC edits).
 - It does not change reputation gains, achievements, or other faction systems.
 - Enable `AllowTwoSide.Interaction.*` in `worldserver.conf` for additional cross-faction systems (chat, mail, etc.).

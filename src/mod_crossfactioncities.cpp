@@ -274,27 +274,30 @@ public:
 
     bool IfNormalReaction(Unit const* a, Unit const* b, ReputationRank& rank) override
     {
-        Player const* player = a ? a->ToPlayer() : nullptr;
-        Creature const* creature = b ? b->ToCreature() : nullptr;
-        Player const* otherPlayer = b ? b->ToPlayer() : nullptr;
+        Player const* playerA = a ? a->GetCharmerOrOwnerPlayerOrPlayerItself() : nullptr;
+        Player const* playerB = b ? b->GetCharmerOrOwnerPlayerOrPlayerItself() : nullptr;
+        Creature const* creatureA = a ? a->ToCreature() : nullptr;
+        Creature const* creatureB = b ? b->ToCreature() : nullptr;
 
-        if (!player || !creature)
-        {
-            player = b ? b->ToPlayer() : nullptr;
-            creature = a ? a->ToCreature() : nullptr;
-        }
-
-        if (player && otherPlayer && ShouldForceNeutralPlayers(player, otherPlayer))
+        if (playerA && playerB && ShouldForceNeutralPlayers(playerA, playerB))
         {
             rank = REP_NEUTRAL;
             return false;
         }
 
-        if (!ShouldForceNeutral(player, creature))
-            return true;
+        if (playerA && creatureB && ShouldForceNeutral(playerA, creatureB))
+        {
+            rank = REP_NEUTRAL;
+            return false;
+        }
 
-        rank = REP_NEUTRAL;
-        return false;
+        if (playerB && creatureA && ShouldForceNeutral(playerB, creatureA))
+        {
+            rank = REP_NEUTRAL;
+            return false;
+        }
+
+        return true;
     }
 
     void OnPatchValuesUpdate(Unit const* unit, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers, Player* target) override
@@ -305,7 +308,7 @@ public:
         if (posPointers.UnitFieldFactionTemplatePos < 0)
             return;
 
-        uint32 clientFactionTemplateId = sClientFactionTemplateId;
+        uint32 clientFactionTemplateId = sClientFactionTemplateId ? sClientFactionTemplateId : target->GetFaction();
 
         if (!clientFactionTemplateId)
             return;
