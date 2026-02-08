@@ -1,0 +1,53 @@
+diff --git a/src/server/game/Globals/ObjectMgr.cpp b/src/server/game/Globals/ObjectMgr.cpp
+index 58c255b99..52d19dbad 100644
+--- a/src/server/game/Globals/ObjectMgr.cpp
++++ b/src/server/game/Globals/ObjectMgr.cpp
+@@ -6731,6 +6731,7 @@ uint32 ObjectMgr::GetNearestTaxiNode(float x, float y, float z, uint32 mapid, ui
+ {
+     bool found = false;
+     float dist = 10000;
++    bool allowTwoSideTaxi = sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP);
+     uint32 id = 0;
+ 
+     for (uint32 i = 1; i < sTaxiNodesStore.GetNumRows(); ++i)
+@@ -6738,8 +6739,17 @@ uint32 ObjectMgr::GetNearestTaxiNode(float x, float y, float z, uint32 mapid, ui
+     {
+         TaxiNodesEntry const* node = sTaxiNodesStore.LookupEntry(i);
+ 
+-        if (!node || node->map_id != mapid || (!node->MountCreatureID[teamId == TEAM_ALLIANCE ? 1 : 0] && node->MountCreatureID[0] != 32981)) // dk flight
++        if (!node || node->map_id != mapid)
++            continue;
++
++        uint8 teamIndex = teamId == TEAM_ALLIANCE ? 1 : 0;
++        uint8 altTeamIndex = teamIndex ? 0 : 1;
++        bool hasMountForTeam = node->MountCreatureID[teamIndex] != 0;
++        bool hasMountForAltTeam = node->MountCreatureID[altTeamIndex] != 0;
++        bool isDkFlight = node->MountCreatureID[0] == 32981;
++
++        if (!hasMountForTeam && !isDkFlight && !(allowTwoSideTaxi && hasMountForAltTeam))
+             continue;
+ 
+         uint8  field   = (uint8)((i - 1) / 32);
+         uint32 submask = 1 << ((i - 1) % 32);
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index 6b91b92dc..52e8b2585 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -10340,9 +10340,16 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc
+     // Hack-Fix for Alliance not being able to use Acherus taxi. There is
+     // only one mount ID for both sides. Probably not good to use 315 in case DBC nodes
+     // change but I couldn't find a suitable alternative. OK to use class because only DK
+     // can use this taxi.
+-    uint32 mount_display_id = sObjectMgr->GetTaxiMountDisplayId(sourcenode, GetTeamId(true), npc == nullptr || (sourcenode == 315 && IsClass(CLASS_DEATH_KNIGHT, CLASS_CONTEXT_TAXI)));
++    bool allowAltTeam = npc == nullptr || (sourcenode == 315 && IsClass(CLASS_DEATH_KNIGHT, CLASS_CONTEXT_TAXI));
++    if (sWorld->getBoolConfig(CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP))
++    {
++        // When two-side interaction is enabled, allow using the opposite team's taxi mount for nodes
++        // that are faction-locked in TaxiNodes.dbc (e.g. Azuremyst/Bloodmyst for Horde).
++        allowAltTeam = true;
++    }
++    uint32 mount_display_id = sObjectMgr->GetTaxiMountDisplayId(sourcenode, GetTeamId(true), allowAltTeam);
+ 
+     // in spell case allow 0 model
+     if ((mount_display_id == 0 && spellid == 0) || sourcepath == 0)
+     {

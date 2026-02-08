@@ -37,6 +37,10 @@ CrossFactionCities.NeutralGameObjects = 0
 # If enabled, only neutralize gameobjects in areas treated as cities/neutral zones/areas.
 CrossFactionCities.NeutralGameObjectsOnlyInCities = 0
 
+# If enabled, allow gaining reputation from quests even if the rewarded faction is hostile to the player.
+# (AzerothCore normally skips quest reputation rewards for hostile factions.)
+CrossFactionCities.AllowHostileQuestReputation = 0
+
 # Additional zone IDs to treat as neutral interaction areas.
 # Defaults include all playable race starting zones from playercreateinfo.sql.
 CrossFactionCities.NeutralZoneIds = "1,12,14,85,141,215,3430,3431,3433,3524,3525,3526"

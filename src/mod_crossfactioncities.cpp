@@ -6,6 +6,7 @@
 #include "GameObject.h"
 #include "Log.h"
 #include "Player.h"
+#include "PlayerScript.h"
 #include "Unit.h"
 
 #include <exception>
@@ -26,6 +27,7 @@ namespace
     bool sMailboxIgnoreCityCheck = true;
     bool sNeutralGameObjects = false;
     bool sNeutralGameObjectsOnlyInCities = false;
+    bool sAllowHostileQuestReputation = false;
     std::unordered_set<uint32> sAllianceCityFactionIds;
     std::unordered_set<uint32> sHordeCityFactionIds;
     std::unordered_set<uint32> sGuardFactionIds;
@@ -255,6 +257,33 @@ namespace
 
         return false;
     }
+
+    FactionTemplateEntry const* GetAnyFactionTemplateForFaction(uint32 factionId)
+    {
+        for (uint32 i = 0; i < sFactionTemplateStore.GetNumRows(); ++i)
+        {
+            if (FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(i))
+            {
+                if (factionTemplate->faction == factionId)
+                    return factionTemplate;
+            }
+        }
+        return nullptr;
+    }
+
+    bool IsFactionHostileToPlayer(Player const* player, uint32 factionId)
+    {
+        if (!player)
+            return false;
+
+        FactionTemplateEntry const* templateEntry = GetAnyFactionTemplateForFaction(factionId);
+        if (!templateEntry)
+            return false;
+
+        TeamId teamId = player->GetTeamId(true);
+        return (teamId == TEAM_ALLIANCE) ? templateEntry->IsHostileToAlliancePlayers()
+                                         : templateEntry->IsHostileToHordePlayers();
+    }
 }
 
 class CrossFactionCities_WorldScript final : public WorldScript
@@ -275,13 +304,14 @@ public:
         sMailboxIgnoreCityCheck = sConfigMgr->GetOption<bool>("CrossFactionCities.MailboxIgnoreCityCheck", true);
         sNeutralGameObjects = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjects", false);
         sNeutralGameObjectsOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjectsOnlyInCities", false);
+        sAllowHostileQuestReputation = sConfigMgr->GetOption<bool>("CrossFactionCities.AllowHostileQuestReputation", false);
         LoadIdSetFromConfig("CrossFactionCities.AllianceCityFactionIds", sAllianceCityFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.HordeCityFactionIds", sHordeCityFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.GuardFactionIds", sGuardFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
 
-        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
+        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
             sEnabled ? 1 : 0,
             sOnlyInCities ? 1 : 0,
             sIncludeGuards ? 1 : 0,
@@ -293,6 +323,7 @@ public:
             sMailboxIgnoreCityCheck ? 1 : 0,
             sNeutralGameObjects ? 1 : 0,
             sNeutralGameObjectsOnlyInCities ? 1 : 0,
+            sAllowHostileQuestReputation ? 1 : 0,
             sAllianceCityFactionIds.size(),
             sHordeCityFactionIds.size(),
             sGuardFactionIds.size(),
@@ -366,6 +397,47 @@ public:
     }
 };
 
+class CrossFactionCities_PlayerScript final : public PlayerScript
+{
+public:
+    CrossFactionCities_PlayerScript() : PlayerScript("CrossFactionCities_PlayerScript") { }
+
+    void OnPlayerGiveReputation(Player* player, int32 factionID, float& amount, ReputationSource repSource) override
+    {
+        if (!sEnabled || !sAllowHostileQuestReputation || !player)
+            return;
+
+        if (amount == 0.0f)
+            return;
+
+        if (player->InBattleground() || player->InArena())
+            return;
+
+        switch (repSource)
+        {
+            case REPUTATION_SOURCE_QUEST:
+            case REPUTATION_SOURCE_DAILY_QUEST:
+            case REPUTATION_SOURCE_WEEKLY_QUEST:
+            case REPUTATION_SOURCE_MONTHLY_QUEST:
+            case REPUTATION_SOURCE_REPEATABLE_QUEST:
+                break;
+            default:
+                return;
+        }
+
+        FactionEntry const* factionEntry = sFactionStore.LookupEntry(uint32(factionID));
+        if (!factionEntry)
+            return;
+
+        if (!IsFactionHostileToPlayer(player, factionEntry->ID))
+            return;
+
+        // Core skips quest reputation for hostile factions; apply it here so cross-faction questing can progress reps.
+        // Disable spillover to avoid unintended reputation changes when forcing hostile-faction quest rep.
+        player->GetReputationMgr().ModifyReputation(factionEntry, amount, true);
+    }
+};
+
 class CrossFactionCities_AllGameObjectScript final : public AllGameObjectScript
 {
 public:
@@ -393,6 +465,7 @@ void Addmod_crossfactioncitiesScripts()
 {
     new CrossFactionCities_WorldScript();
     new CrossFactionCities_UnitScript();
+    new CrossFactionCities_PlayerScript();
     new CrossFactionCities_AllGameObjectScript();
 }
 

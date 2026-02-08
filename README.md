@@ -7,12 +7,16 @@ Cross-faction city neutrality and interaction for AzerothCore WotLK.
 - Guards do not aggro opposing players in cities (optional).
 - Opposing players can interact normally (no PvP except duels, optional).
 - Opposing-faction mailboxes are usable (optional).
-- No reputation tables are modified.
+- Opposing-faction-owned gameobjects (chests, cages, etc.) can be made interactable (optional).
+- Hostile-faction quest reputation gains can be allowed (optional).
+- Cross-faction flightmasters/taxi can be enabled (core patch; gated by `AllowTwoSide.Interaction.Group`).
+- No reputation DB tables are modified.
 - No client DBC edits are required.
 
 ## Requirements
 - AzerothCore WotLK.
 - Core hook for GameObject faction updates (provided as a patch in this module).
+- Core hook for cross-faction taxi node/mount selection (provided as a patch in this module).
 
 See `patches/NOTE.md` for integration notes.
 
@@ -23,16 +27,17 @@ See `patches/NOTE.md` for integration notes.
 modules/mod-crossfactioncities
 ```
 
-2) From the AzerothCore repo root, apply the core patch (idempotent):
+2) From the AzerothCore repo root, apply core patches (idempotent):
 
 ```
 modules/mod-crossfactioncities/patches/apply-core-gameobject-faction-hook.sh
+modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-hook.sh
 ```
 
 3) Copy the config:
 
 ```
-cp modules/mod-crossfactioncities/conf/mod_crossfactioncities.conf.dist 
+cp modules/mod-crossfactioncities/conf/mod_crossfactioncities.conf.dist \
   env/dist/etc/modules/mod_crossfactioncities.conf
 ```
 
@@ -63,6 +68,7 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 - CrossFactionCities.MailboxIgnoreCityCheck
 - CrossFactionCities.NeutralGameObjects
 - CrossFactionCities.NeutralGameObjectsOnlyInCities
+- CrossFactionCities.AllowHostileQuestReputation
 - CrossFactionCities.NeutralZoneIds
 - CrossFactionCities.NeutralAreaIds
 - CrossFactionCities.AllianceCityFactionIds
@@ -71,13 +77,14 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 
 ## Idempotency
 - `patches/apply-core-gameobject-faction-hook.sh` can be run multiple times safely.
+- `patches/apply-core-taxi-crossfaction-hook.sh` can be run multiple times safely.
 - `allow_crossfaction_quests.sql` is repeat safe and preserves original masks in a backup table.
 - `restore_crossfaction_quests.sql` is repeat safe and removes its backup table.
 
 ## Compatibility notes
 - Player-owned pets, guardians, and charmed units inherit the owner's neutrality checks (guards should not aggro when a pet is summoned).
 - This module does not modify client data (no DBC edits).
-- It does not change reputation gains, achievements, or other faction systems.
+- By default it does not change reputation/achievements; `CrossFactionCities.AllowHostileQuestReputation` can enable quest rep gains for hostile factions.
 - Enable `AllowTwoSide.Interaction.*` in `worldserver.conf` for additional cross-faction systems (chat, mail, etc.).
 - If you run mod-playerbots, set no-PvP zones/areas so bots do not attack in towns/cities:
   - `AiPlayerbot.PvpProhibitedZoneIds` and `AiPlayerbot.PvpProhibitedAreaIds`.
