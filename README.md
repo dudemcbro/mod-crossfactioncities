@@ -61,6 +61,8 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 - CrossFactionCities.PlayerNeutralOnlyInCities
 - CrossFactionCities.NeutralMailboxes
 - CrossFactionCities.MailboxIgnoreCityCheck
+- CrossFactionCities.NeutralGameObjects
+- CrossFactionCities.NeutralGameObjectsOnlyInCities
 - CrossFactionCities.NeutralZoneIds
 - CrossFactionCities.NeutralAreaIds
 - CrossFactionCities.AllianceCityFactionIds

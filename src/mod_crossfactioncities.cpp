@@ -24,6 +24,8 @@ namespace
     bool sPlayerNeutralOnlyInCities = false;
     bool sNeutralMailboxes = true;
     bool sMailboxIgnoreCityCheck = true;
+    bool sNeutralGameObjects = false;
+    bool sNeutralGameObjectsOnlyInCities = false;
     std::unordered_set<uint32> sAllianceCityFactionIds;
     std::unordered_set<uint32> sHordeCityFactionIds;
     std::unordered_set<uint32> sGuardFactionIds;
@@ -225,6 +227,34 @@ namespace
 
         return true;
     }
+
+    bool ShouldNeutralizeGameObject(Player const* player, GameObject const* go, uint32 faction)
+    {
+        if (!sEnabled || !sNeutralGameObjects || !player || !go)
+            return false;
+
+        if (player->InBattleground() || player->InArena())
+            return false;
+
+        if (sNeutralGameObjectsOnlyInCities && !IsCityAreaForPlayer(player))
+            return false;
+
+        // Skip objects that are already neutral / no faction template.
+        if (!faction)
+            return false;
+
+        FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(faction);
+        if (!factionTemplate)
+            return false;
+
+        TeamId playerTeam = player->GetTeamId(true);
+        if (playerTeam == TEAM_ALLIANCE)
+            return IsHordeFaction(factionTemplate);
+        if (playerTeam == TEAM_HORDE)
+            return IsAllianceFaction(factionTemplate);
+
+        return false;
+    }
 }
 
 class CrossFactionCities_WorldScript final : public WorldScript
@@ -243,13 +273,15 @@ public:
         sPlayerNeutralOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.PlayerNeutralOnlyInCities", false);
         sNeutralMailboxes = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralMailboxes", true);
         sMailboxIgnoreCityCheck = sConfigMgr->GetOption<bool>("CrossFactionCities.MailboxIgnoreCityCheck", true);
+        sNeutralGameObjects = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjects", false);
+        sNeutralGameObjectsOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjectsOnlyInCities", false);
         LoadIdSetFromConfig("CrossFactionCities.AllianceCityFactionIds", sAllianceCityFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.HordeCityFactionIds", sHordeCityFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.GuardFactionIds", sGuardFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
 
-        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
+        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
             sEnabled ? 1 : 0,
             sOnlyInCities ? 1 : 0,
             sIncludeGuards ? 1 : 0,
@@ -259,6 +291,8 @@ public:
             sPlayerNeutralOnlyInCities ? 1 : 0,
             sNeutralMailboxes ? 1 : 0,
             sMailboxIgnoreCityCheck ? 1 : 0,
+            sNeutralGameObjects ? 1 : 0,
+            sNeutralGameObjectsOnlyInCities ? 1 : 0,
             sAllianceCityFactionIds.size(),
             sHordeCityFactionIds.size(),
             sGuardFactionIds.size(),
@@ -339,10 +373,19 @@ public:
 
     void OnGameObjectFactionCalc(GameObject const* go, Player const* viewer, uint32& faction) 
     {
-        if (!ShouldNeutralizeMailbox(viewer, go))
+        if (!go || !viewer)
             return;
 
-        faction = sClientFactionTemplateId ? sClientFactionTemplateId : viewer->GetFaction();
+        // Mailboxes: keep existing behavior and configurability.
+        if (ShouldNeutralizeMailbox(viewer, go))
+        {
+            faction = sClientFactionTemplateId ? sClientFactionTemplateId : viewer->GetFaction();
+            return;
+        }
+
+        // Other faction-owned interactables (chests, cages, etc.) can be neutralized globally.
+        if (ShouldNeutralizeGameObject(viewer, go, faction))
+            faction = sClientFactionTemplateId ? sClientFactionTemplateId : viewer->GetFaction();
     }
 };
 
