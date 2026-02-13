@@ -9,7 +9,8 @@ Cross-faction city neutrality and interaction for AzerothCore WotLK.
 - Opposing-faction mailboxes are usable (optional).
 - Opposing-faction-owned gameobjects (chests, cages, etc.) can be made interactable (optional).
 - Hostile-faction quest reputation gains can be allowed (optional).
-- Cross-faction flightmasters/taxi can be enabled (core patch; gated by `AllowTwoSide.Interaction.Group`).
+- Cross-faction flightmasters/taxi can be enabled (core patches; gated by `AllowTwoSide.Interaction.Group`).
+- For faction-locked taxi nodes (MountCreatureID=0 for one faction), the client flight map can appear empty; an optional core patch adds a gossip-based destination list fallback.
 - No reputation DB tables are modified.
 - No client DBC edits are required.
 
@@ -17,6 +18,7 @@ Cross-faction city neutrality and interaction for AzerothCore WotLK.
 - AzerothCore WotLK.
 - Core hook for GameObject faction updates (provided as a patch in this module).
 - Core hook for cross-faction taxi node/mount selection (provided as a patch in this module).
+- Optional: gossip fallback for faction-locked taxi nodes (provided as a patch in this module).
 
 See `patches/NOTE.md` for integration notes.
 
@@ -32,6 +34,7 @@ modules/mod-crossfactioncities
 ```
 modules/mod-crossfactioncities/patches/apply-core-gameobject-faction-hook.sh
 modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-hook.sh
+modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-gossip-fallback.sh
 ```
 
 3) Copy the config:
@@ -83,6 +86,8 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 
 ## Compatibility notes
 - Player-owned pets, guardians, and charmed units inherit the owner's neutrality checks (guards should not aggro when a pet is summoned).
+- Some client builds hide faction-locked taxi nodes entirely (e.g. Azuremyst/Bloodmyst flight points for Horde). If your flight map is empty on those nodes, apply `apply-core-taxi-crossfaction-gossip-fallback.sh`.
+- If `InstantFlightPaths` is enabled in `worldserver.conf`, taxi travel may teleport instantly (core behavior). With `InstantFlightPaths = 2`, use the flightmaster "Toggle instant flight" option to disable it.
 - This module does not modify client data (no DBC edits).
 - By default it does not change reputation/achievements; `CrossFactionCities.AllowHostileQuestReputation` can enable quest rep gains for hostile factions.
 - Enable `AllowTwoSide.Interaction.*` in `worldserver.conf` for additional cross-faction systems (chat, mail, etc.).
