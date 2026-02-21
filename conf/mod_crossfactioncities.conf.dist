@@ -32,7 +32,7 @@ CrossFactionCities.MailboxIgnoreCityCheck = 1
 
 # Neutralize opposing-faction-owned gameobjects (chests, cages, etc.) by spoofing the GO faction
 # sent to the client. This makes faction-owned interactables targetable/usable cross-faction.
-CrossFactionCities.NeutralGameObjects = 0
+CrossFactionCities.NeutralGameObjects = 1
 
 # If enabled, only neutralize gameobjects in areas treated as cities/neutral zones/areas.
 CrossFactionCities.NeutralGameObjectsOnlyInCities = 0

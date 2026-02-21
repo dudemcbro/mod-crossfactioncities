@@ -19,6 +19,7 @@ namespace
 {
     bool sEnabled = true;
     bool sOnlyInCities = true;
+    bool sAllAreasNeutral = false;
     bool sIncludeGuards = true;
     bool sUseFactionGroup = true;
     uint32 sClientFactionTemplateId = 0;
@@ -82,6 +83,9 @@ namespace
     {
         if (!player)
             return false;
+
+        if (sAllAreasNeutral)
+            return true;
 
         if (sNeutralZoneIds.find(player->GetZoneId()) != sNeutralZoneIds.end())
             return true;
@@ -296,6 +300,7 @@ public:
     {
         sEnabled = sConfigMgr->GetOption<bool>("CrossFactionCities.Enable", true);
         sOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.OnlyInCities", true);
+        sAllAreasNeutral = sConfigMgr->GetOption<bool>("CrossFactionCities.AllAreasNeutral", false);
         sIncludeGuards = sConfigMgr->GetOption<bool>("CrossFactionCities.IncludeGuards", true);
         sUseFactionGroup = sConfigMgr->GetOption<bool>("CrossFactionCities.UseFactionGroup", true);
         sClientFactionTemplateId = sConfigMgr->GetOption<uint32>("CrossFactionCities.ClientFactionTemplateId", 0);
