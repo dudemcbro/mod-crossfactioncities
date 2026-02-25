@@ -62,6 +62,7 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 ## Config
 - CrossFactionCities.Enable
 - CrossFactionCities.OnlyInCities
+- CrossFactionCities.AllAreasNeutral
 - CrossFactionCities.IncludeGuards
 - CrossFactionCities.UseFactionGroup
 - CrossFactionCities.ClientFactionTemplateId

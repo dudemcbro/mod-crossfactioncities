@@ -111,20 +111,12 @@ namespace
 
         bool ourAlliance = (factionTemplate->ourMask & FACTION_MASK_ALLIANCE) != 0;
         bool ourHorde = (factionTemplate->ourMask & FACTION_MASK_HORDE) != 0;
-        if (ourAlliance != ourHorde)
-            return ourAlliance ? FactionSide::Alliance : FactionSide::Horde;
+        // Use only the faction-group bitmask to classify city-side alignment.
+        // Inferring side from friendly/hostile masks is too broad and catches many combat factions.
+        if (ourAlliance == ourHorde)
+            return FactionSide::Unknown;
 
-        bool friendlyAlliance = (factionTemplate->friendlyMask & FACTION_MASK_ALLIANCE) != 0;
-        bool friendlyHorde = (factionTemplate->friendlyMask & FACTION_MASK_HORDE) != 0;
-        if (friendlyAlliance != friendlyHorde)
-            return friendlyAlliance ? FactionSide::Alliance : FactionSide::Horde;
-
-        bool hostileAlliance = (factionTemplate->hostileMask & FACTION_MASK_ALLIANCE) != 0;
-        bool hostileHorde = (factionTemplate->hostileMask & FACTION_MASK_HORDE) != 0;
-        if (hostileAlliance != hostileHorde)
-            return hostileAlliance ? FactionSide::Horde : FactionSide::Alliance;
-
-        return FactionSide::Unknown;
+        return ourAlliance ? FactionSide::Alliance : FactionSide::Horde;
     }
 
     bool IsAllianceFaction(FactionTemplateEntry const* factionTemplate)
@@ -317,9 +309,10 @@ public:
         LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
 
-        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
+        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
             sEnabled ? 1 : 0,
             sOnlyInCities ? 1 : 0,
+            sAllAreasNeutral ? 1 : 0,
             sIncludeGuards ? 1 : 0,
             sUseFactionGroup ? 1 : 0,
             sClientFactionTemplateId,

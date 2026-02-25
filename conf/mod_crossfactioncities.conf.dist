@@ -7,11 +7,14 @@ CrossFactionCities.Enable = 1
 # If enabled, only apply neutrality in areas flagged as capital/city/town in AreaTable.dbc.
 CrossFactionCities.OnlyInCities = 1
 
+# If enabled, treat all areas as neutral interaction areas (except battlegrounds/arenas).
+CrossFactionCities.AllAreasNeutral = 0
+
 # If enabled, automatically treat creatures flagged as guards as eligible for neutrality.
 CrossFactionCities.IncludeGuards = 1
 
-# If enabled, any creature with Alliance/Horde faction group is eligible within cities.
-# This fills gaps when new faction templates are added later.
+# If enabled, creatures with explicit Alliance/Horde faction-group alignment are eligible.
+# This fills gaps when new city faction templates are added later.
 CrossFactionCities.UseFactionGroup = 1
 
 # FactionTemplate ID to send to clients for opposing city NPCs.
