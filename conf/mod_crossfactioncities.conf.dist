@@ -17,6 +17,16 @@ CrossFactionCities.IncludeGuards = 1
 # This fills gaps when new city faction templates are added later.
 CrossFactionCities.UseFactionGroup = 1
 
+# If enabled, allows neutralizing faction-group-derived NPCs even when they have no NPC flags.
+# Keep this disabled to avoid neutralizing most world combat NPCs (guard-like ASSIST_PLAYERS factions are still allowed).
+CrossFactionCities.NeutralizeNonServiceNpcs = 0
+
+# If enabled, keep factions hostile if their faction template is hostile to both Alliance and Horde players.
+CrossFactionCities.KeepHostileToBothFactions = 1
+
+# If enabled, logs startup/reload audit of faction templates by role usage (mixed-use vs combat-only).
+CrossFactionCities.FactionRoleAuditLog = 1
+
 # FactionTemplate ID to send to clients for opposing city NPCs.
 # 0 = use the player's own faction template (guarantees no hostile sword icon).
 CrossFactionCities.ClientFactionTemplateId = 0
@@ -58,3 +68,9 @@ CrossFactionCities.HordeCityFactionIds = ""
 
 # Optional guard/defender faction template IDs (FactionTemplate ID), if guards use a separate faction.
 CrossFactionCities.GuardFactionIds = ""
+
+# FactionTemplate IDs that should never be neutralized by this module.
+CrossFactionCities.NeverNeutralFactionTemplateIds = ""
+
+# creature_template.entry values that should never be neutralized by this module.
+CrossFactionCities.NeverNeutralCreatureEntryIds = ""

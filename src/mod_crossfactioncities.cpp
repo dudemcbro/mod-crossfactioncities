@@ -5,15 +5,19 @@
 #include "DBCStores.h"
 #include "GameObject.h"
 #include "Log.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "ReputationMgr.h"
 #include "PlayerScript.h"
 #include "Unit.h"
 
+#include <algorithm>
 #include <exception>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace
 {
@@ -22,6 +26,9 @@ namespace
     bool sAllAreasNeutral = false;
     bool sIncludeGuards = true;
     bool sUseFactionGroup = true;
+    bool sNeutralizeNonServiceNpcs = false;
+    bool sKeepHostileToBothFactions = true;
+    bool sFactionRoleAuditLog = true;
     uint32 sClientFactionTemplateId = 0;
     bool sPlayerNeutral = true;
     bool sPlayerNeutralOnlyInCities = false;
@@ -35,6 +42,28 @@ namespace
     std::unordered_set<uint32> sGuardFactionIds;
     std::unordered_set<uint32> sNeutralZoneIds;
     std::unordered_set<uint32> sNeutralAreaIds;
+    std::unordered_set<uint32> sNeverNeutralFactionTemplateIds;
+    std::unordered_set<uint32> sNeverNeutralCreatureEntryIds;
+    std::unordered_set<uint32> sMixedUseFactionTemplateIds;
+    std::unordered_set<uint32> sCombatOnlyFactionTemplateIds;
+
+    constexpr uint32 NEUTRAL_INTERACTION_NPC_FLAGS =
+        UNIT_NPC_FLAG_GOSSIP |
+        UNIT_NPC_FLAG_QUESTGIVER |
+        UNIT_NPC_FLAG_TRAINER |
+        UNIT_NPC_FLAG_VENDOR_MASK |
+        UNIT_NPC_FLAG_FLIGHTMASTER |
+        UNIT_NPC_FLAG_PETITIONER |
+        UNIT_NPC_FLAG_BATTLEMASTER |
+        UNIT_NPC_FLAG_BANKER |
+        UNIT_NPC_FLAG_INNKEEPER |
+        UNIT_NPC_FLAG_SPIRITHEALER |
+        UNIT_NPC_FLAG_SPIRITGUIDE |
+        UNIT_NPC_FLAG_TABARDDESIGNER |
+        UNIT_NPC_FLAG_AUCTIONEER |
+        UNIT_NPC_FLAG_STABLEMASTER |
+        UNIT_NPC_FLAG_GUILD_BANKER |
+        UNIT_NPC_FLAG_MAILBOX;
 
     void Trim(std::string& token)
     {
@@ -129,6 +158,127 @@ namespace
         return GetFactionSide(factionTemplate) == FactionSide::Horde;
     }
 
+    bool IsAssistPlayersFaction(FactionTemplateEntry const* factionTemplate)
+    {
+        return factionTemplate && (factionTemplate->factionFlags & FACTION_TEMPLATE_FLAG_ASSIST_PLAYERS);
+    }
+
+    bool HasNeutralInteractionNpcFlags(uint32 npcFlags)
+    {
+        return (npcFlags & NEUTRAL_INTERACTION_NPC_FLAGS) != 0;
+    }
+
+    bool IsHostileToBothPlayerFactions(FactionTemplateEntry const* factionTemplate)
+    {
+        if (!factionTemplate)
+            return false;
+
+        return factionTemplate->IsHostileToAlliancePlayers() && factionTemplate->IsHostileToHordePlayers();
+    }
+
+    bool IsNeutralizableRole(Creature const* creature, FactionTemplateEntry const* factionTemplate, bool isGuard, bool isMailboxNpc)
+    {
+        if (!creature)
+            return false;
+
+        if (isMailboxNpc && sNeutralMailboxes)
+            return true;
+
+        if (isGuard)
+            return true;
+
+        if (creature->IsServiceProvider() || creature->IsQuestGiver() || creature->IsGossip() || creature->HasNpcFlag(UNIT_NPC_FLAG_STABLEMASTER))
+            return true;
+
+        return IsAssistPlayersFaction(factionTemplate);
+    }
+
+    std::string FormatFactionIdListForLog(std::unordered_set<uint32> const& ids, size_t maxIds = 40)
+    {
+        if (ids.empty())
+            return "none";
+
+        std::vector<uint32> sorted(ids.begin(), ids.end());
+        std::sort(sorted.begin(), sorted.end());
+
+        std::ostringstream oss;
+        size_t count = std::min(maxIds, sorted.size());
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (i)
+                oss << ',';
+            oss << sorted[i];
+        }
+
+        if (sorted.size() > count)
+            oss << ",...+" << (sorted.size() - count);
+
+        return oss.str();
+    }
+
+    void RebuildFactionRoleAudit()
+    {
+        sMixedUseFactionTemplateIds.clear();
+        sCombatOnlyFactionTemplateIds.clear();
+
+        CreatureTemplateContainer const* creatureTemplates = sObjectMgr->GetCreatureTemplates();
+        if (!creatureTemplates)
+            return;
+
+        struct RoleUsage
+        {
+            uint32 total = 0;
+            uint32 neutralizable = 0;
+            uint32 combat = 0;
+        };
+
+        std::unordered_map<uint32, RoleUsage> usageByFaction;
+
+        for (auto const& pair : *creatureTemplates)
+        {
+            CreatureTemplate const& creatureTemplate = pair.second;
+            if (!creatureTemplate.faction)
+                continue;
+
+            FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(creatureTemplate.faction);
+            bool hasNeutralRole = HasNeutralInteractionNpcFlags(creatureTemplate.npcflag) ||
+                                  creatureTemplate.HasFlagsExtra(CREATURE_FLAG_EXTRA_GUARD) ||
+                                  IsAssistPlayersFaction(factionTemplate);
+
+            RoleUsage& usage = usageByFaction[creatureTemplate.faction];
+            ++usage.total;
+            if (hasNeutralRole)
+                ++usage.neutralizable;
+            else
+                ++usage.combat;
+        }
+
+        for (auto const& pair : usageByFaction)
+        {
+            uint32 factionTemplateId = pair.first;
+            RoleUsage const& usage = pair.second;
+
+            if (usage.neutralizable > 0 && usage.combat > 0)
+                sMixedUseFactionTemplateIds.insert(factionTemplateId);
+            else if (usage.neutralizable == 0 && usage.combat > 0)
+                sCombatOnlyFactionTemplateIds.insert(factionTemplateId);
+        }
+
+        if (!sFactionRoleAuditLog)
+            return;
+
+        LOG_INFO("module", "mod-crossfactioncities: faction role audit complete: factions={}, mixedUse={}, combatOnly={}",
+            usageByFaction.size(), sMixedUseFactionTemplateIds.size(), sCombatOnlyFactionTemplateIds.size());
+
+        if (!sMixedUseFactionTemplateIds.empty())
+            LOG_WARN("module", "mod-crossfactioncities: mixed-use faction template IDs (service+combat): {}",
+                FormatFactionIdListForLog(sMixedUseFactionTemplateIds));
+
+        if (!sCombatOnlyFactionTemplateIds.empty())
+            LOG_INFO("module", "mod-crossfactioncities: combat-only faction template IDs: {}",
+                FormatFactionIdListForLog(sCombatOnlyFactionTemplateIds));
+    }
+
     bool ShouldForceNeutral(Player const* player, Creature const* creature)
     {
         if (!sEnabled || !player || !creature)
@@ -143,9 +293,19 @@ namespace
             return false;
 
         uint32 factionId = creature->GetFaction();
+        uint32 creatureEntry = creature->GetEntry();
         FactionTemplateEntry const* factionTemplate = creature->GetFactionTemplateEntry();
-        bool isAllianceCity = sAllianceCityFactionIds.find(factionId) != sAllianceCityFactionIds.end();
-        bool isHordeCity = sHordeCityFactionIds.find(factionId) != sHordeCityFactionIds.end();
+
+        if (sNeverNeutralFactionTemplateIds.find(factionId) != sNeverNeutralFactionTemplateIds.end())
+            return false;
+
+        if (sNeverNeutralCreatureEntryIds.find(creatureEntry) != sNeverNeutralCreatureEntryIds.end())
+            return false;
+
+        bool isAllianceCityExplicit = sAllianceCityFactionIds.find(factionId) != sAllianceCityFactionIds.end();
+        bool isHordeCityExplicit = sHordeCityFactionIds.find(factionId) != sHordeCityFactionIds.end();
+        bool isAllianceCity = isAllianceCityExplicit;
+        bool isHordeCity = isHordeCityExplicit;
         bool isGuard = sGuardFactionIds.find(factionId) != sGuardFactionIds.end();
 
         if (sUseFactionGroup && factionTemplate)
@@ -158,6 +318,20 @@ namespace
 
         if (!isGuard && sIncludeGuards && creature->IsGuard())
             isGuard = true;
+
+        bool isNeutralizableRole = IsNeutralizableRole(creature, factionTemplate, isGuard, isMailboxNpc);
+        bool isDerivedFactionGroupOnly = (isAllianceCity || isHordeCity) && !isAllianceCityExplicit && !isHordeCityExplicit;
+        if (isDerivedFactionGroupOnly)
+        {
+            if (!sNeutralizeNonServiceNpcs && sCombatOnlyFactionTemplateIds.find(factionId) != sCombatOnlyFactionTemplateIds.end())
+                return false;
+
+            if (sKeepHostileToBothFactions && IsHostileToBothPlayerFactions(factionTemplate))
+                return false;
+
+            if (!sNeutralizeNonServiceNpcs && !isNeutralizableRole)
+                return false;
+        }
 
         if (!isAllianceCity && !isHordeCity && !isGuard)
         {
@@ -288,13 +462,16 @@ class CrossFactionCities_WorldScript final : public WorldScript
 public:
     CrossFactionCities_WorldScript() : WorldScript("CrossFactionCities_WorldScript") { }
 
-    void OnAfterConfigLoad(bool /*reload*/) override
+    void OnAfterConfigLoad(bool reload) override
     {
         sEnabled = sConfigMgr->GetOption<bool>("CrossFactionCities.Enable", true);
         sOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.OnlyInCities", true);
         sAllAreasNeutral = sConfigMgr->GetOption<bool>("CrossFactionCities.AllAreasNeutral", false);
         sIncludeGuards = sConfigMgr->GetOption<bool>("CrossFactionCities.IncludeGuards", true);
         sUseFactionGroup = sConfigMgr->GetOption<bool>("CrossFactionCities.UseFactionGroup", true);
+        sNeutralizeNonServiceNpcs = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralizeNonServiceNpcs", false);
+        sKeepHostileToBothFactions = sConfigMgr->GetOption<bool>("CrossFactionCities.KeepHostileToBothFactions", true);
+        sFactionRoleAuditLog = sConfigMgr->GetOption<bool>("CrossFactionCities.FactionRoleAuditLog", true);
         sClientFactionTemplateId = sConfigMgr->GetOption<uint32>("CrossFactionCities.ClientFactionTemplateId", 0);
         sPlayerNeutral = sConfigMgr->GetOption<bool>("CrossFactionCities.PlayerNeutral", true);
         sPlayerNeutralOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.PlayerNeutralOnlyInCities", false);
@@ -308,13 +485,18 @@ public:
         LoadIdSetFromConfig("CrossFactionCities.GuardFactionIds", sGuardFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
+        LoadIdSetFromConfig("CrossFactionCities.NeverNeutralFactionTemplateIds", sNeverNeutralFactionTemplateIds);
+        LoadIdSetFromConfig("CrossFactionCities.NeverNeutralCreatureEntryIds", sNeverNeutralCreatureEntryIds);
 
-        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, IncludeGuards={}, UseFactionGroup={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}",
+        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, IncludeGuards={}, UseFactionGroup={}, NeutralizeNonServiceNpcs={}, KeepHostileToBothFactions={}, FactionRoleAuditLog={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}, NeverNeutralFactionTemplateIds={}, NeverNeutralCreatureEntryIds={}",
             sEnabled ? 1 : 0,
             sOnlyInCities ? 1 : 0,
             sAllAreasNeutral ? 1 : 0,
             sIncludeGuards ? 1 : 0,
             sUseFactionGroup ? 1 : 0,
+            sNeutralizeNonServiceNpcs ? 1 : 0,
+            sKeepHostileToBothFactions ? 1 : 0,
+            sFactionRoleAuditLog ? 1 : 0,
             sClientFactionTemplateId,
             sPlayerNeutral ? 1 : 0,
             sPlayerNeutralOnlyInCities ? 1 : 0,
@@ -327,7 +509,17 @@ public:
             sHordeCityFactionIds.size(),
             sGuardFactionIds.size(),
             sNeutralZoneIds.size(),
-            sNeutralAreaIds.size());
+            sNeutralAreaIds.size(),
+            sNeverNeutralFactionTemplateIds.size(),
+            sNeverNeutralCreatureEntryIds.size());
+
+        if (reload)
+            RebuildFactionRoleAudit();
+    }
+
+    void OnStartup() override
+    {
+        RebuildFactionRoleAudit();
     }
 };
 

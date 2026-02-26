@@ -65,6 +65,9 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 - CrossFactionCities.AllAreasNeutral
 - CrossFactionCities.IncludeGuards
 - CrossFactionCities.UseFactionGroup
+- CrossFactionCities.NeutralizeNonServiceNpcs
+- CrossFactionCities.KeepHostileToBothFactions
+- CrossFactionCities.FactionRoleAuditLog
 - CrossFactionCities.ClientFactionTemplateId
 - CrossFactionCities.PlayerNeutral
 - CrossFactionCities.PlayerNeutralOnlyInCities
@@ -78,6 +81,8 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 - CrossFactionCities.AllianceCityFactionIds
 - CrossFactionCities.HordeCityFactionIds
 - CrossFactionCities.GuardFactionIds
+- CrossFactionCities.NeverNeutralFactionTemplateIds
+- CrossFactionCities.NeverNeutralCreatureEntryIds
 
 ## Idempotency
 - `patches/apply-core-gameobject-faction-hook.sh` can be run multiple times safely.
@@ -87,6 +92,7 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 
 ## Compatibility notes
 - Player-owned pets, guardians, and charmed units inherit the owner's neutrality checks (guards should not aggro when a pet is summoned).
+- Role-based neutrality is used for faction-group-derived NPCs (service/quest/gossip/guard/assist-player roles); combat-only factions are kept hostile automatically.
 - Some client builds hide faction-locked taxi nodes entirely (e.g. Azuremyst/Bloodmyst flight points for Horde). If your flight map is empty on those nodes, apply `apply-core-taxi-crossfaction-gossip-fallback.sh`.
 - If `InstantFlightPaths` is enabled in `worldserver.conf`, taxi travel may teleport instantly (core behavior). With `InstantFlightPaths = 2`, use the flightmaster "Toggle instant flight" option to disable it.
 - This module does not modify client data (no DBC edits).
