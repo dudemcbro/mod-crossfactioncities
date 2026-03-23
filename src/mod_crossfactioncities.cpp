@@ -176,7 +176,7 @@ namespace
         return factionTemplate->IsHostileToAlliancePlayers() && factionTemplate->IsHostileToHordePlayers();
     }
 
-    bool IsNeutralizableRole(Creature const* creature, FactionTemplateEntry const* factionTemplate, bool isGuard, bool isMailboxNpc)
+    bool IsNeutralizableRole(Creature const* creature, bool isGuard, bool isMailboxNpc)
     {
         if (!creature)
             return false;
@@ -187,10 +187,15 @@ namespace
         if (isGuard)
             return true;
 
+        // Only neutralize creatures that actually provide services to players.
+        // FACTION_TEMPLATE_FLAG_ASSIST_PLAYERS is a combat-assist flag, not a service-provider
+        // signal; using it here was too broad and caused ambient civilian/combat NPCs (e.g.
+        // refugees, footmen) that share a faction with real service providers to be incorrectly
+        // neutralized.  Real service providers are already caught by the NPC-flag checks above.
         if (creature->IsServiceProvider() || creature->IsQuestGiver() || creature->IsGossip() || creature->HasNpcFlag(UNIT_NPC_FLAG_STABLEMASTER))
             return true;
 
-        return IsAssistPlayersFaction(factionTemplate);
+        return false;
     }
 
     std::string FormatFactionIdListForLog(std::unordered_set<uint32> const& ids, size_t maxIds = 40)
@@ -319,7 +324,7 @@ namespace
         if (!isGuard && sIncludeGuards && creature->IsGuard())
             isGuard = true;
 
-        bool isNeutralizableRole = IsNeutralizableRole(creature, factionTemplate, isGuard, isMailboxNpc);
+        bool isNeutralizableRole = IsNeutralizableRole(creature, isGuard, isMailboxNpc);
         bool isDerivedFactionGroupOnly = (isAllianceCity || isHordeCity) && !isAllianceCityExplicit && !isHordeCityExplicit;
         if (isDerivedFactionGroupOnly)
         {
