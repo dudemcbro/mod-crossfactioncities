@@ -15,10 +15,15 @@ Cross-faction city neutrality and interaction for AzerothCore WotLK.
 - No client DBC edits are required.
 
 ## Requirements
-- AzerothCore WotLK.
+- AzerothCore WotLK (3.3.5a). The patches were checked against the mod-playerbots
+  fork of azerothcore-wotlk (commit 2d2a522, January 2026).
+- bash and git (the apply scripts use `git apply`).
 - Core hook for GameObject faction updates (provided as a patch in this module).
+  Without it the module still builds, but the gameobject part of
+  `NeutralMailboxes` and `NeutralGameObjects` silently does nothing.
 - Core hook for cross-faction taxi node/mount selection (provided as a patch in this module).
 - Optional: gossip fallback for faction-locked taxi nodes (provided as a patch in this module).
+  It relies on the taxi hook patch above, so apply that one first.
 
 See `patches/NOTE.md` for integration notes.
 
@@ -44,11 +49,14 @@ cp modules/mod-crossfactioncities/conf/mod_crossfactioncities.conf.dist \
   env/dist/etc/modules/mod_crossfactioncities.conf
 ```
 
-4) Apply SQL (world DB) to allow quest visibility across factions:
+4) Apply SQL to the world database (usually `acore_world`) to allow quest visibility
+   across factions. It is not auto-imported by the AzerothCore DB updater; run it by hand:
 
 ```
-mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_crossfaction_quests.sql
+mysql -u <user> -p acore_world < modules/mod-crossfactioncities/sql/world/base/allow_crossfaction_quests.sql
 ```
+
+   To undo it later, run `sql/world/base/restore_crossfaction_quests.sql` the same way.
 
 5) Rebuild and restart `worldserver`.
 
@@ -87,6 +95,7 @@ mysql -u <user> -p <db> < modules/mod-crossfactioncities/sql/world/base/allow_cr
 ## Idempotency
 - `patches/apply-core-gameobject-faction-hook.sh` can be run multiple times safely.
 - `patches/apply-core-taxi-crossfaction-hook.sh` can be run multiple times safely.
+- `patches/apply-core-taxi-crossfaction-gossip-fallback.sh` can be run multiple times safely.
 - `allow_crossfaction_quests.sql` is repeat safe and preserves original masks in a backup table.
 - `restore_crossfaction_quests.sql` is repeat safe and removes its backup table.
 
