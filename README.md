@@ -22,12 +22,13 @@ mailboxes and flightmasters.
 
 ## Requirements
 
-- AzerothCore WotLK (3.3.5a). The patches apply cleanly to the `custom` branch of
-  [azerothcore-wotlk-playerbots-custom](https://github.com/dudemcbro/azerothcore-wotlk-playerbots-custom)
-  and were first made against the
+- AzerothCore WotLK (3.3.5a). The patches apply cleanly to stock
+  [azerothcore-wotlk](https://github.com/azerothcore/azerothcore-wotlk) `master`
+  (commit 51c32b5, September 2026), to the
   [mod-playerbots AzerothCore fork](https://github.com/mod-playerbots/azerothcore-wotlk)
-  (`Playerbot` branch, commit 2d2a522, January 2026). Other cores may need them
-  adjusted.
+  (`Playerbot` branch, January and September 2026) and to the `custom` branch of
+  [azerothcore-wotlk-playerbots-custom](https://github.com/dudemcbro/azerothcore-wotlk-playerbots-custom).
+  Other cores may need them adjusted.
 - bash and git (the apply scripts use `git apply`).
 - Core patches shipped in [`patches/`](patches/NOTE.md):
   - `core-gameobject-faction-hook.patch`: a GameObject faction hook. Without it the

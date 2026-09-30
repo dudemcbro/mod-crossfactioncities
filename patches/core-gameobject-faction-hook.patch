@@ -19,10 +19,11 @@ diff --git a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp b/s
 index 2a1f09d67..5f9aa3558 100644
 --- a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp
 +++ b/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.cpp
-@@ -49,6 +49,17 @@ void ScriptMgr::OnGameObjectSaveToDB(GameObject* go)
+@@ -48,4 +48,15 @@ void ScriptMgr::OnGameObjectSaveToDB(GameObject* go)
+         script->OnGameObjectSaveToDB(go);
      });
  }
- 
++
 +void ScriptMgr::OnGameObjectFactionCalc(GameObject const* go, Player const* viewer, uint32& faction)
 +{
 +    if (!go || !viewer)
@@ -33,10 +34,7 @@ index 2a1f09d67..5f9aa3558 100644
 +        script->OnGameObjectFactionCalc(go, viewer, faction);
 +    });
 +}
-+
- AllGameObjectScript::AllGameObjectScript(const char* name) :
-     ScriptObject(name)
- {
+ 
 diff --git a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h b/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h
 index 496bc5300..f68b535a3 100644
 --- a/src/server/game/Scripting/ScriptDefines/AllGameObjectScript.h
