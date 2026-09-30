@@ -8,9 +8,9 @@ This module ships core patches that are applied to the AzerothCore source tree:
 | `core-taxi-crossfaction-hook.patch` | Cross-faction taxi node and mount selection, active when `AllowTwoSide.Interaction.Group = 1` | `apply-core-taxi-crossfaction-hook.sh` |
 | `core-taxi-crossfaction-gossip-fallback.patch` | A gossip list of destinations when the client flight map is empty on faction-locked taxi nodes | `apply-core-taxi-crossfaction-gossip-fallback.sh` |
 
-The patches apply cleanly to the `custom` branch of azerothcore-wotlk-playerbots-custom
-and were made against the mod-playerbots fork of azerothcore-wotlk. Other or newer
-cores may differ, so check them with `git apply --check` before applying.
+The patches apply cleanly to stock azerothcore-wotlk `master`, to the mod-playerbots
+fork of azerothcore-wotlk and to the `custom` branch of azerothcore-wotlk-playerbots-custom.
+Other or newer cores may differ, so check them with `git apply --check` before applying.
 
 Apply `core-taxi-crossfaction-hook.patch` before relying on
 `core-taxi-crossfaction-gossip-fallback.patch`: the fallback only runs when the nearest
