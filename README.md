@@ -6,9 +6,12 @@ mailboxes and flightmasters.
 
 ## Features
 
-- Opposing-faction city NPCs are neutral and can be talked to.
-- Guards do not aggro opposing players in cities (optional).
-- Opposing players can interact normally, with no PvP except duels (optional).
+- Opposing-faction NPCs in cities, towns and chosen zones are neutral: they do not
+  attack and can be talked to, traded with and used as flightmasters.
+- Server and client always agree on which NPCs are hostile (see
+  [How NPC neutrality works](#how-npc-neutrality-works)).
+- Opposing players are friendly, with no PvP except duels (optional). Battlegrounds,
+  arenas, Wintergrasp and world PvP zones keep normal PvP.
 - Opposing-faction mailboxes are usable (optional).
 - Opposing-faction gameobjects (chests, cages and the like) can be made usable
   (optional, needs a core patch).
@@ -75,26 +78,60 @@ described in the file. Options (value as shipped):
 | `CrossFactionCities.Enable` | `1` |
 | `CrossFactionCities.OnlyInCities` | `1` |
 | `CrossFactionCities.AllAreasNeutral` | `0` |
-| `CrossFactionCities.IncludeGuards` | `1` |
-| `CrossFactionCities.UseFactionGroup` | `1` |
-| `CrossFactionCities.NeutralizeNonServiceNpcs` | `0` |
-| `CrossFactionCities.KeepHostileToBothFactions` | `1` |
-| `CrossFactionCities.FactionRoleAuditLog` | `1` |
-| `CrossFactionCities.ClientFactionTemplateId` | `0` |
+| `CrossFactionCities.NeutralZoneIds` | the playable race starting zones |
+| `CrossFactionCities.NeutralAreaIds` | empty |
+| `CrossFactionCities.HostileZoneIds` | empty |
+| `CrossFactionCities.HostileAreaIds` | `372,404,2157` (Tiragarde Keep, Bael'dun Digsite, Bael'dun Keep) |
+| `CrossFactionCities.NeutralInInstances` | `0` |
+| `CrossFactionCities.NpcReactionRank` | `3` (neutral) |
+| `CrossFactionCities.ExtraAllianceFactionIds` | empty |
+| `CrossFactionCities.ExtraHordeFactionIds` | empty |
+| `CrossFactionCities.NeverNeutralFactionIds` | empty |
 | `CrossFactionCities.PlayerNeutral` | `1` |
 | `CrossFactionCities.PlayerNeutralOnlyInCities` | `0` |
+| `CrossFactionCities.WorldPvPZonesHostile` | `1` |
+| `CrossFactionCities.ClientFactionTemplateId` | `0` |
 | `CrossFactionCities.NeutralMailboxes` | `1` |
 | `CrossFactionCities.MailboxIgnoreCityCheck` | `1` |
 | `CrossFactionCities.NeutralGameObjects` | `1` |
 | `CrossFactionCities.NeutralGameObjectsOnlyInCities` | `0` |
 | `CrossFactionCities.AllowHostileQuestReputation` | `0` |
-| `CrossFactionCities.NeutralZoneIds` | the playable race starting zones |
-| `CrossFactionCities.NeutralAreaIds` | empty |
-| `CrossFactionCities.AllianceCityFactionIds` | empty |
-| `CrossFactionCities.HordeCityFactionIds` | empty |
-| `CrossFactionCities.GuardFactionIds` | empty |
-| `CrossFactionCities.NeverNeutralFactionTemplateIds` | empty |
-| `CrossFactionCities.NeverNeutralCreatureEntryIds` | empty |
+
+Changes made with `.reload config` apply to each player at their next area change or
+login.
+
+### Options removed in the forced reaction rework
+
+NPC neutrality now works per faction instead of per NPC role, so these options no
+longer exist and can be deleted from your `mod_crossfactioncities.conf`:
+`IncludeGuards`, `UseFactionGroup`, `NeutralizeNonServiceNpcs`,
+`KeepHostileToBothFactions`, `FactionRoleAuditLog`, `AllianceCityFactionIds`,
+`HordeCityFactionIds`, `GuardFactionIds`, `NeverNeutralFactionTemplateIds` and
+`NeverNeutralCreatureEntryIds`. Use `ExtraAllianceFactionIds`,
+`ExtraHordeFactionIds` and `NeverNeutralFactionIds` (Faction.dbc IDs) for faction
+lists, and `HostileAreaIds` to keep enemy NPCs hostile in a quest area.
+
+## How NPC neutrality works
+
+The module makes the other faction's NPCs neutral with forced reactions, the mechanism
+disguise spells use. The core checks forced reactions before anything else when it
+decides whether two units are hostile, and the server sends the same list to the
+client, so what a player sees always matches what the NPCs do.
+
+- The NPC factions are found at startup from the DBC data: every Faction.dbc faction
+  whose faction templates are all in the Alliance group, or all in the Horde group.
+  The worldserver log lists them (`Alliance NPC factions`, `Horde NPC factions`).
+- A player gets the forced reactions while standing in a neutral area (a city, a town
+  or a zone or area from `NeutralZoneIds` and `NeutralAreaIds`) and loses them on
+  leaving it. The check runs at every area change.
+- `HostileZoneIds` and `HostileAreaIds` win over every other rule. The defaults keep
+  the Kul Tiras marines at Tiragarde Keep and the Bael'dun dwarves hostile, since Horde
+  quests send players to kill them inside neutral starting zones.
+- Battlegrounds, arenas and Wintergrasp never get forced reactions, and dungeons and
+  raids only with `NeutralInInstances = 1`.
+- Neutral NPCs (`NpcReactionRank = 3`) do not attack but can be attacked, so quest
+  targets stay killable. Reputation that already gives the configured reaction or
+  better is left to decide the reaction on its own.
 
 ## Database setup
 
@@ -117,9 +154,16 @@ mysql -u <user> -p acore_world < modules/mod-crossfactioncities/sql/world/base/a
 
 - Player-owned pets, guardians and charmed units follow their owner's neutrality, so
   guards do not aggro when a pet is out.
-- NPCs whose neutrality comes from their faction group are neutralized by role
-  (service, quest, gossip, guard, assist-player); factions used only for combat stay
-  hostile.
+- NPC neutrality is per faction: every NPC of a listed faction is neutral in a neutral
+  area, guards and quest targets included. Keep quest areas hostile with
+  `HostileAreaIds`.
+- `AllowTwoSide.Interaction.Group = 1` lets a mixed-faction group queue for a
+  battleground together. The core then puts every member on the leader's team without
+  changing anyone's faction, so a member from the other faction is hostile to their own
+  team. Arenas handle this with their team auras; for battlegrounds use a cross-faction
+  battleground module such as
+  [mod-cfbg](https://github.com/azerothcore/mod-cfbg), or queue as single-faction
+  groups.
 - Some clients hide faction-locked taxi nodes entirely (for example the Azuremyst and
   Bloodmyst flight points for Horde). If the flight map is empty there, apply the
   gossip fallback patch.
@@ -171,6 +215,19 @@ request against `main`. Commit messages follow
 `feat: ...`, `docs: ...`). If you change a core patch, check that it still applies
 with `git apply --check` from a clean core checkout.
 
+## Credits
+
+- [mod-Faction-Free](https://github.com/gitdalisar/mod-Faction-Free) by Dalisar
+  (GitHub [gitdalisar](https://github.com/gitdalisar)), AGPL-3.0. Its approach to
+  cross-faction play inspires this module's roadmap: reputation with the other
+  faction, quests, inns, languages, faction-locked gear, PvP flags in enemy
+  capitals, a teleport network and achievements for both factions. Those ideas are
+  re-implemented here on the server side, without client patches; no Faction-Free
+  code or data is included. Each feature that takes an idea from Faction-Free names
+  it here when it is added.
+
 ## License
 
-GNU General Public License v3.0, see [LICENSE](LICENSE).
+GNU Affero General Public License v3.0, see [LICENSE](LICENSE). If you run a
+modified version of this module on a server that players connect to, you must offer
+those players the source code of your version.
