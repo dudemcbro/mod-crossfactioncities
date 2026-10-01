@@ -328,13 +328,20 @@ namespace
         bool isDerivedFactionGroupOnly = (isAllianceCity || isHordeCity) && !isAllianceCityExplicit && !isHordeCityExplicit;
         if (isDerivedFactionGroupOnly)
         {
-            if (!sNeutralizeNonServiceNpcs && sCombatOnlyFactionTemplateIds.find(factionId) != sCombatOnlyFactionTemplateIds.end())
+            bool isCombatOnlyFaction = sCombatOnlyFactionTemplateIds.find(factionId) != sCombatOnlyFactionTemplateIds.end();
+            bool isMixedUseFaction = sMixedUseFactionTemplateIds.find(factionId) != sMixedUseFactionTemplateIds.end();
+
+            if (isCombatOnlyFaction)
                 return false;
 
             if (sKeepHostileToBothFactions && IsHostileToBothPlayerFactions(factionTemplate))
                 return false;
 
-            if (!sNeutralizeNonServiceNpcs && !isNeutralizableRole)
+            // Faction-group derivation is safe for service/guard roles, but not for generic entries on
+            // mixed-use faction templates. Those templates are shared by both city NPCs and normal world
+            // combat units (e.g. Bael'dun dwarves using Alliance faction 57), so blanket non-service
+            // neutralization would incorrectly make hostile mobs friendly.
+            if (!isNeutralizableRole && (isMixedUseFaction || !sNeutralizeNonServiceNpcs))
                 return false;
         }
 
