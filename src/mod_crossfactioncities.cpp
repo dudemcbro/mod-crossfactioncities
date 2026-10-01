@@ -1,14 +1,18 @@
 #include "ScriptMgr.h"
 #include "AllGameObjectScript.h"
+#include "BattlefieldMgr.h"
 #include "Config.h"
-#include "Creature.h"
 #include "DBCStores.h"
+#include "DataMap.h"
 #include "GameObject.h"
 #include "Log.h"
-#include "ObjectMgr.h"
+#include "Map.h"
+#include "OutdoorPvPMgr.h"
+#include "Pet.h"
 #include "Player.h"
-#include "ReputationMgr.h"
 #include "PlayerScript.h"
+#include "ReputationMgr.h"
+#include "SpellAuraEffects.h"
 #include "Unit.h"
 
 #include <algorithm>
@@ -24,11 +28,9 @@ namespace
     bool sEnabled = true;
     bool sOnlyInCities = true;
     bool sAllAreasNeutral = false;
-    bool sIncludeGuards = true;
-    bool sUseFactionGroup = true;
-    bool sNeutralizeNonServiceNpcs = false;
-    bool sKeepHostileToBothFactions = true;
-    bool sFactionRoleAuditLog = true;
+    bool sNeutralInInstances = false;
+    bool sWorldPvPZonesHostile = true;
+    ReputationRank sNpcReactionRank = REP_NEUTRAL;
     uint32 sClientFactionTemplateId = 0;
     bool sPlayerNeutral = true;
     bool sPlayerNeutralOnlyInCities = false;
@@ -37,33 +39,37 @@ namespace
     bool sNeutralGameObjects = false;
     bool sNeutralGameObjectsOnlyInCities = false;
     bool sAllowHostileQuestReputation = false;
-    std::unordered_set<uint32> sAllianceCityFactionIds;
-    std::unordered_set<uint32> sHordeCityFactionIds;
-    std::unordered_set<uint32> sGuardFactionIds;
     std::unordered_set<uint32> sNeutralZoneIds;
     std::unordered_set<uint32> sNeutralAreaIds;
-    std::unordered_set<uint32> sNeverNeutralFactionTemplateIds;
-    std::unordered_set<uint32> sNeverNeutralCreatureEntryIds;
-    std::unordered_set<uint32> sMixedUseFactionTemplateIds;
-    std::unordered_set<uint32> sCombatOnlyFactionTemplateIds;
+    std::unordered_set<uint32> sHostileZoneIds;
+    std::unordered_set<uint32> sHostileAreaIds;
+    std::unordered_set<uint32> sExtraAllianceFactionIds;
+    std::unordered_set<uint32> sExtraHordeFactionIds;
+    std::unordered_set<uint32> sNeverNeutralFactionIds;
 
-    constexpr uint32 NEUTRAL_INTERACTION_NPC_FLAGS =
-        UNIT_NPC_FLAG_GOSSIP |
-        UNIT_NPC_FLAG_QUESTGIVER |
-        UNIT_NPC_FLAG_TRAINER |
-        UNIT_NPC_FLAG_VENDOR_MASK |
-        UNIT_NPC_FLAG_FLIGHTMASTER |
-        UNIT_NPC_FLAG_PETITIONER |
-        UNIT_NPC_FLAG_BATTLEMASTER |
-        UNIT_NPC_FLAG_BANKER |
-        UNIT_NPC_FLAG_INNKEEPER |
-        UNIT_NPC_FLAG_SPIRITHEALER |
-        UNIT_NPC_FLAG_SPIRITGUIDE |
-        UNIT_NPC_FLAG_TABARDDESIGNER |
-        UNIT_NPC_FLAG_AUCTIONEER |
-        UNIT_NPC_FLAG_STABLEMASTER |
-        UNIT_NPC_FLAG_GUILD_BANKER |
-        UNIT_NPC_FLAG_MAILBOX;
+    // Faction.dbc IDs whose NPCs are made neutral to the other side's players in neutral areas.
+    std::vector<uint32> sAllianceSideFactionIds;
+    std::vector<uint32> sHordeSideFactionIds;
+    // Any template of each of those factions, to read back a player's forced reaction.
+    std::unordered_map<uint32, FactionTemplateEntry const*> sFactionTemplateByFactionId;
+
+    std::string const PLAYER_STATE_KEY = "mod-crossfactioncities";
+
+    struct ZoneStatus
+    {
+        bool battleZone = false;     // battleground, arena or battlefield (Wintergrasp)
+        bool worldPvPZone = false;   // world PvP objective zone, when WorldPvPZonesHostile is set
+        bool instance = false;       // dungeon or raid
+        bool hostileArea = false;    // listed in HostileZoneIds or HostileAreaIds
+        bool neutralArea = false;    // city, town or listed neutral zone/area
+    };
+
+    struct PlayerState : public DataMap::Base
+    {
+        bool initialized = false;
+        ZoneStatus status;
+        std::unordered_set<uint32> forcedFactionIds;
+    };
 
     void Trim(std::string& token)
     {
@@ -94,9 +100,24 @@ namespace
             }
             catch (std::exception const&)
             {
-                LOG_WARN("module", "mod-crossfactioncities: Invalid faction id '{}' in {}", token, key);
+                LOG_WARN("module", "mod-crossfactioncities: Invalid id '{}' in {}", token, key);
             }
         }
+    }
+
+    std::string FormatIdListForLog(std::vector<uint32> const& ids)
+    {
+        if (ids.empty())
+            return "none";
+
+        std::ostringstream oss;
+        for (size_t i = 0; i < ids.size(); ++i)
+        {
+            if (i)
+                oss << ',';
+            oss << ids[i];
+        }
+        return oss.str();
     }
 
     bool IsCityAreaByFlags(AreaTableEntry const* area)
@@ -108,292 +129,281 @@ namespace
         return (flags & (AREA_FLAG_CAPITAL | AREA_FLAG_CITY | AREA_FLAG_TOWN | AREA_FLAG_SLAVE_CAPITAL | AREA_FLAG_SLAVE_CAPITAL2)) != 0;
     }
 
-    bool IsCityAreaForPlayer(Player const* player)
+    ZoneStatus ComputeZoneStatus(Player const* player, uint32 zoneId, uint32 areaId)
     {
-        if (!player)
-            return false;
+        ZoneStatus status;
 
-        if (sAllAreasNeutral)
-            return true;
+        status.battleZone = player->InBattleground() || player->InArena() || sBattlefieldMgr->GetBattlefieldToZoneId(zoneId);
+        status.worldPvPZone = sWorldPvPZonesHostile && sOutdoorPvPMgr->GetOutdoorPvPToZoneId(zoneId);
 
-        if (sNeutralZoneIds.find(player->GetZoneId()) != sNeutralZoneIds.end())
-            return true;
-        if (sNeutralAreaIds.find(player->GetAreaId()) != sNeutralAreaIds.end())
-            return true;
+        if (Map const* map = player->FindMap())
+            status.instance = map->IsDungeon();
 
-        AreaTableEntry const* area = sAreaTableStore.LookupEntry(player->GetAreaId());
-        AreaTableEntry const* zone = sAreaTableStore.LookupEntry(player->GetZoneId());
-        return IsCityAreaByFlags(area) || IsCityAreaByFlags(zone);
-    }
+        status.hostileArea = sHostileZoneIds.count(zoneId) || sHostileAreaIds.count(areaId);
 
-    enum class FactionSide : uint8
-    {
-        Unknown,
-        Alliance,
-        Horde
-    };
-
-    FactionSide GetFactionSide(FactionTemplateEntry const* factionTemplate)
-    {
-        if (!factionTemplate)
-            return FactionSide::Unknown;
-
-        bool ourAlliance = (factionTemplate->ourMask & FACTION_MASK_ALLIANCE) != 0;
-        bool ourHorde = (factionTemplate->ourMask & FACTION_MASK_HORDE) != 0;
-        // Use only the faction-group bitmask to classify city-side alignment.
-        // Inferring side from friendly/hostile masks is too broad and catches many combat factions.
-        if (ourAlliance == ourHorde)
-            return FactionSide::Unknown;
-
-        return ourAlliance ? FactionSide::Alliance : FactionSide::Horde;
-    }
-
-    bool IsAllianceFaction(FactionTemplateEntry const* factionTemplate)
-    {
-        return GetFactionSide(factionTemplate) == FactionSide::Alliance;
-    }
-
-    bool IsHordeFaction(FactionTemplateEntry const* factionTemplate)
-    {
-        return GetFactionSide(factionTemplate) == FactionSide::Horde;
-    }
-
-    bool IsAssistPlayersFaction(FactionTemplateEntry const* factionTemplate)
-    {
-        return factionTemplate && (factionTemplate->factionFlags & FACTION_TEMPLATE_FLAG_ASSIST_PLAYERS);
-    }
-
-    bool HasNeutralInteractionNpcFlags(uint32 npcFlags)
-    {
-        return (npcFlags & NEUTRAL_INTERACTION_NPC_FLAGS) != 0;
-    }
-
-    bool IsHostileToBothPlayerFactions(FactionTemplateEntry const* factionTemplate)
-    {
-        if (!factionTemplate)
-            return false;
-
-        return factionTemplate->IsHostileToAlliancePlayers() && factionTemplate->IsHostileToHordePlayers();
-    }
-
-    bool IsNeutralizableRole(Creature const* creature, bool isGuard, bool isMailboxNpc)
-    {
-        if (!creature)
-            return false;
-
-        if (isMailboxNpc && sNeutralMailboxes)
-            return true;
-
-        if (isGuard)
-            return true;
-
-        // Only neutralize creatures that actually provide services to players.
-        // FACTION_TEMPLATE_FLAG_ASSIST_PLAYERS is a combat-assist flag, not a service-provider
-        // signal; using it here was too broad and caused ambient civilian/combat NPCs (e.g.
-        // refugees, footmen) that share a faction with real service providers to be incorrectly
-        // neutralized.  Real service providers are already caught by the NPC-flag checks above.
-        if (creature->IsServiceProvider() || creature->IsQuestGiver() || creature->IsGossip() || creature->HasNpcFlag(UNIT_NPC_FLAG_STABLEMASTER))
-            return true;
-
-        return false;
-    }
-
-    std::string FormatFactionIdListForLog(std::unordered_set<uint32> const& ids, size_t maxIds = 40)
-    {
-        if (ids.empty())
-            return "none";
-
-        std::vector<uint32> sorted(ids.begin(), ids.end());
-        std::sort(sorted.begin(), sorted.end());
-
-        std::ostringstream oss;
-        size_t count = std::min(maxIds, sorted.size());
-        for (size_t i = 0; i < count; ++i)
+        if (!status.hostileArea)
         {
-            if (i)
-                oss << ',';
-            oss << sorted[i];
+            status.neutralArea = sAllAreasNeutral ||
+                                 sNeutralZoneIds.count(zoneId) ||
+                                 sNeutralAreaIds.count(areaId) ||
+                                 IsCityAreaByFlags(sAreaTableStore.LookupEntry(areaId)) ||
+                                 IsCityAreaByFlags(sAreaTableStore.LookupEntry(zoneId));
         }
 
-        if (sorted.size() > count)
-            oss << ",...+" << (sorted.size() - count);
-
-        return oss.str();
+        return status;
     }
 
-    void RebuildFactionRoleAudit()
+    // Uses the status cached at the last area update, so the server and the client
+    // (which only learns about changes at area updates) agree.
+    ZoneStatus GetZoneStatus(Player const* player)
     {
-        sMixedUseFactionTemplateIds.clear();
-        sCombatOnlyFactionTemplateIds.clear();
-
-        CreatureTemplateContainer const* creatureTemplates = sObjectMgr->GetCreatureTemplates();
-        if (!creatureTemplates)
-            return;
-
-        struct RoleUsage
+        if (PlayerState const* state = player->CustomData.Get<PlayerState>(PLAYER_STATE_KEY))
         {
-            uint32 total = 0;
-            uint32 neutralizable = 0;
-            uint32 combat = 0;
-        };
+            if (state->initialized)
+            {
+                ZoneStatus status = state->status;
+                // Joining a battleground or arena can happen before the next area update.
+                status.battleZone = status.battleZone || player->InBattleground() || player->InArena();
+                return status;
+            }
+        }
 
-        std::unordered_map<uint32, RoleUsage> usageByFaction;
+        return ComputeZoneStatus(player, player->GetZoneId(), player->GetAreaId());
+    }
 
-        for (auto const& pair : *creatureTemplates)
+    bool IsNpcNeutralHere(ZoneStatus const& status)
+    {
+        if (!sEnabled || status.battleZone || status.hostileArea)
+            return false;
+
+        if (status.instance && !sNeutralInInstances)
+            return false;
+
+        return !sOnlyInCities || status.neutralArea;
+    }
+
+    void BuildSideFactionLists()
+    {
+        // Bit 1: some template of the faction is in the Alliance group, bit 2: in the Horde group.
+        std::unordered_map<uint32, uint8> sideMasks;
+        sFactionTemplateByFactionId.clear();
+        for (uint32 i = 0; i < sFactionTemplateStore.GetNumRows(); ++i)
         {
-            CreatureTemplate const& creatureTemplate = pair.second;
-            if (!creatureTemplate.faction)
+            FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(i);
+            if (!factionTemplate || !factionTemplate->faction)
                 continue;
 
-            FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(creatureTemplate.faction);
-            bool hasNeutralRole = HasNeutralInteractionNpcFlags(creatureTemplate.npcflag) ||
-                                  creatureTemplate.HasFlagsExtra(CREATURE_FLAG_EXTRA_GUARD) ||
-                                  IsAssistPlayersFaction(factionTemplate);
+            sFactionTemplateByFactionId.emplace(factionTemplate->faction, factionTemplate);
 
-            RoleUsage& usage = usageByFaction[creatureTemplate.faction];
-            ++usage.total;
-            if (hasNeutralRole)
-                ++usage.neutralizable;
-            else
-                ++usage.combat;
+            uint8& mask = sideMasks[factionTemplate->faction];
+            if (factionTemplate->ourMask & FACTION_MASK_ALLIANCE)
+                mask |= 1;
+            if (factionTemplate->ourMask & FACTION_MASK_HORDE)
+                mask |= 2;
         }
 
-        for (auto const& pair : usageByFaction)
+        // Player race factions follow the player rules (PlayerNeutral), never the NPC rules.
+        std::unordered_set<uint32> playerFactionIds;
+        for (uint32 i = 0; i < sChrRacesStore.GetNumRows(); ++i)
+            if (ChrRacesEntry const* race = sChrRacesStore.LookupEntry(i))
+                if (FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(race->FactionID))
+                    playerFactionIds.insert(factionTemplate->faction);
+
+        sAllianceSideFactionIds.clear();
+        sHordeSideFactionIds.clear();
+
+        // A faction without any template is not used by any NPC.
+        auto isUsable = [&](uint32 factionId)
         {
-            uint32 factionTemplateId = pair.first;
-            RoleUsage const& usage = pair.second;
+            return sFactionTemplateByFactionId.count(factionId) && !playerFactionIds.count(factionId) && !sNeverNeutralFactionIds.count(factionId);
+        };
 
-            if (usage.neutralizable > 0 && usage.combat > 0)
-                sMixedUseFactionTemplateIds.insert(factionTemplateId);
-            else if (usage.neutralizable == 0 && usage.combat > 0)
-                sCombatOnlyFactionTemplateIds.insert(factionTemplateId);
+        for (auto const& [factionId, mask] : sideMasks)
+        {
+            if (!isUsable(factionId))
+                continue;
+
+            // Factions with templates in both groups (escort factions and the like) are left alone.
+            if (mask == 1)
+                sAllianceSideFactionIds.push_back(factionId);
+            else if (mask == 2)
+                sHordeSideFactionIds.push_back(factionId);
         }
 
-        if (!sFactionRoleAuditLog)
-            return;
+        for (uint32 factionId : sExtraAllianceFactionIds)
+            if (isUsable(factionId))
+                sAllianceSideFactionIds.push_back(factionId);
 
-        LOG_INFO("module", "mod-crossfactioncities: faction role audit complete: factions={}, mixedUse={}, combatOnly={}",
-            usageByFaction.size(), sMixedUseFactionTemplateIds.size(), sCombatOnlyFactionTemplateIds.size());
+        for (uint32 factionId : sExtraHordeFactionIds)
+            if (isUsable(factionId))
+                sHordeSideFactionIds.push_back(factionId);
 
-        if (!sMixedUseFactionTemplateIds.empty())
-            LOG_WARN("module", "mod-crossfactioncities: mixed-use faction template IDs (service+combat): {}",
-                FormatFactionIdListForLog(sMixedUseFactionTemplateIds));
+        for (std::vector<uint32>* list : { &sAllianceSideFactionIds, &sHordeSideFactionIds })
+        {
+            std::sort(list->begin(), list->end());
+            list->erase(std::unique(list->begin(), list->end()), list->end());
+        }
 
-        if (!sCombatOnlyFactionTemplateIds.empty())
-            LOG_INFO("module", "mod-crossfactioncities: combat-only faction template IDs: {}",
-                FormatFactionIdListForLog(sCombatOnlyFactionTemplateIds));
+        LOG_INFO("module", "mod-crossfactioncities: Alliance NPC factions ({}): {}", sAllianceSideFactionIds.size(), FormatIdListForLog(sAllianceSideFactionIds));
+        LOG_INFO("module", "mod-crossfactioncities: Horde NPC factions ({}): {}", sHordeSideFactionIds.size(), FormatIdListForLog(sHordeSideFactionIds));
     }
 
-    bool ShouldForceNeutral(Player const* player, Creature const* creature)
+    bool HasForceReactionAura(Player const* player, uint32 factionId)
     {
-        if (!sEnabled || !player || !creature)
-            return false;
-
-        if (player->InBattleground() || player->InArena())
-            return false;
-
-        bool isMailboxNpc = creature->HasNpcFlag(UNIT_NPC_FLAG_MAILBOX);
-
-        if (sOnlyInCities && !IsCityAreaForPlayer(player) && !(sNeutralMailboxes && sMailboxIgnoreCityCheck && isMailboxNpc))
-            return false;
-
-        uint32 factionId = creature->GetFaction();
-        uint32 creatureEntry = creature->GetEntry();
-        FactionTemplateEntry const* factionTemplate = creature->GetFactionTemplateEntry();
-
-        if (sNeverNeutralFactionTemplateIds.find(factionId) != sNeverNeutralFactionTemplateIds.end())
-            return false;
-
-        if (sNeverNeutralCreatureEntryIds.find(creatureEntry) != sNeverNeutralCreatureEntryIds.end())
-            return false;
-
-        bool isAllianceCityExplicit = sAllianceCityFactionIds.find(factionId) != sAllianceCityFactionIds.end();
-        bool isHordeCityExplicit = sHordeCityFactionIds.find(factionId) != sHordeCityFactionIds.end();
-        bool isAllianceCity = isAllianceCityExplicit;
-        bool isHordeCity = isHordeCityExplicit;
-        bool isGuard = sGuardFactionIds.find(factionId) != sGuardFactionIds.end();
-
-        if (sUseFactionGroup && factionTemplate)
-        {
-            if (IsAllianceFaction(factionTemplate))
-                isAllianceCity = true;
-            if (IsHordeFaction(factionTemplate))
-                isHordeCity = true;
-        }
-
-        if (!isGuard && sIncludeGuards && creature->IsGuard())
-            isGuard = true;
-
-        bool isNeutralizableRole = IsNeutralizableRole(creature, isGuard, isMailboxNpc);
-        bool isDerivedFactionGroupOnly = (isAllianceCity || isHordeCity) && !isAllianceCityExplicit && !isHordeCityExplicit;
-        if (isDerivedFactionGroupOnly)
-        {
-            bool isCombatOnlyFaction = sCombatOnlyFactionTemplateIds.find(factionId) != sCombatOnlyFactionTemplateIds.end();
-            bool isMixedUseFaction = sMixedUseFactionTemplateIds.find(factionId) != sMixedUseFactionTemplateIds.end();
-
-            if (isCombatOnlyFaction)
-                return false;
-
-            if (sKeepHostileToBothFactions && IsHostileToBothPlayerFactions(factionTemplate))
-                return false;
-
-            // Faction-group derivation is safe for service/guard roles, but not for generic entries on
-            // mixed-use faction templates. Those templates are shared by both city NPCs and normal world
-            // combat units (e.g. Bael'dun dwarves using Alliance faction 57), so blanket non-service
-            // neutralization would incorrectly make hostile mobs friendly.
-            if (!isNeutralizableRole && (isMixedUseFaction || !sNeutralizeNonServiceNpcs))
-                return false;
-        }
-
-        if (!isAllianceCity && !isHordeCity && !isGuard)
-        {
-            if (sNeutralMailboxes && isMailboxNpc)
+        for (AuraEffect const* effect : player->GetAuraEffectsByType(SPELL_AURA_FORCE_REACTION))
+            if (uint32(effect->GetMiscValue()) == factionId)
                 return true;
-            return false;
-        }
-
-        TeamId playerTeam = player->GetTeamId(true);
-        if (playerTeam == TEAM_ALLIANCE)
-        {
-            if (isHordeCity)
-                return true;
-            if (isGuard && IsHordeFaction(factionTemplate))
-                return true;
-        }
-        else if (playerTeam == TEAM_HORDE)
-        {
-            if (isAllianceCity)
-                return true;
-            if (isGuard && IsAllianceFaction(factionTemplate))
-                return true;
-        }
 
         return false;
+    }
+
+    // NPC neutrality uses forced reactions (SMSG_SET_FORCED_REACTIONS). The core checks them first
+    // in every reaction test and the client applies them at once, so the server and the client
+    // always agree on which NPCs are hostile.
+    void RefreshForcedReactions(Player* player, PlayerState& state)
+    {
+        std::unordered_set<uint32> wanted;
+
+        if (IsNpcNeutralHere(state.status))
+        {
+            std::vector<uint32> const& factionIds = player->GetTeamId(true) == TEAM_ALLIANCE ? sHordeSideFactionIds : sAllianceSideFactionIds;
+            ReputationMgr const& reputation = player->GetReputationMgr();
+
+            for (uint32 factionId : factionIds)
+            {
+                // A spell that forces this reaction (disguises and the like) takes precedence.
+                if (HasForceReactionAura(player, factionId))
+                    continue;
+
+                // Reputation earned with the faction already gives at least the configured reaction.
+                FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionId);
+                if (factionEntry && factionEntry->CanHaveReputation() && !reputation.IsAtWar(factionEntry) &&
+                    reputation.GetRank(factionEntry) >= sNpcReactionRank)
+                    continue;
+
+                wanted.insert(factionId);
+            }
+        }
+
+        ReputationMgr& reputation = player->GetReputationMgr();
+        auto currentForcedRank = [&](uint32 factionId) -> ReputationRank const*
+        {
+            auto itr = sFactionTemplateByFactionId.find(factionId);
+            return itr != sFactionTemplateByFactionId.end() ? reputation.GetForcedRankIfAny(itr->second) : nullptr;
+        };
+
+        bool changed = false;
+
+        for (uint32 factionId : state.forcedFactionIds)
+        {
+            if (wanted.count(factionId) || HasForceReactionAura(player, factionId) || !currentForcedRank(factionId))
+                continue;
+
+            reputation.ApplyForceReaction(factionId, sNpcReactionRank, false);
+            changed = true;
+        }
+
+        // Applied every time: a spell aura that ends removes the faction's forced reaction too.
+        for (uint32 factionId : wanted)
+        {
+            ReputationRank const* current = currentForcedRank(factionId);
+            if (current && *current == sNpcReactionRank)
+                continue;
+
+            reputation.ApplyForceReaction(factionId, sNpcReactionRank, true);
+            changed = true;
+        }
+
+        state.forcedFactionIds = std::move(wanted);
+
+        if (changed)
+            reputation.SendForceReactions();
     }
 
     bool ShouldForceNeutralPlayers(Player const* viewer, Player const* other)
     {
-        if (!sEnabled || !sPlayerNeutral || !viewer || !other)
+        if (!sEnabled || !sPlayerNeutral || !viewer || !other || viewer == other)
             return false;
 
-        if (viewer->InBattleground() || viewer->InArena())
-            return false;
-
-        if (other->InBattleground() || other->InArena())
+        TeamId viewerTeam = viewer->GetTeamId(true);
+        TeamId otherTeam = other->GetTeamId(true);
+        if (viewerTeam == TEAM_NEUTRAL || otherTeam == TEAM_NEUTRAL || viewerTeam == otherTeam)
             return false;
 
         if (viewer->duel && viewer->duel->Opponent == other && viewer->duel->State == DUEL_STATE_IN_PROGRESS)
             return false;
 
-        if (sPlayerNeutralOnlyInCities && !IsCityAreaForPlayer(viewer))
+        ZoneStatus viewerStatus = GetZoneStatus(viewer);
+        ZoneStatus otherStatus = GetZoneStatus(other);
+
+        // PvP content always wins: battlegrounds, arenas, Wintergrasp and world PvP zones.
+        if (viewerStatus.battleZone || otherStatus.battleZone || viewerStatus.worldPvPZone || otherStatus.worldPvPZone)
             return false;
 
-        TeamId viewerTeam = viewer->GetTeamId(true);
-        TeamId otherTeam = other->GetTeamId(true);
-        if (viewerTeam == TEAM_NEUTRAL || otherTeam == TEAM_NEUTRAL)
+        // In city-only mode a player inside a city is safe from players outside it, and the other way round.
+        if (sPlayerNeutralOnlyInCities && !viewerStatus.neutralArea && !otherStatus.neutralArea)
             return false;
 
-        return viewerTeam != otherTeam;
+        return true;
+    }
+
+    void ForceFactionResend(Unit* unit)
+    {
+        unit->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
+        if (Player* player = unit->ToPlayer())
+            if (Pet* pet = player->GetPet())
+                pet->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
+    }
+
+    // Faction values only reach a client when they change, so after a player's status changes
+    // resend the faction of that player to others and of nearby opposing players to that player.
+    void RefreshPlayerFactionViews(Player* player)
+    {
+        if (!player->IsInWorld())
+            return;
+
+        Map* map = player->FindMap();
+        if (!map)
+            return;
+
+        ForceFactionResend(player);
+
+        TeamId team = player->GetTeamId(true);
+        for (MapReference const& ref : map->GetPlayers())
+        {
+            Player* other = ref.GetSource();
+            if (!other || other == player || other->GetTeamId(true) == team)
+                continue;
+
+            if (player->HaveAtClient(other))
+                ForceFactionResend(other);
+        }
+    }
+
+    void UpdatePlayerState(Player* player, uint32 zoneId, uint32 areaId)
+    {
+        if (!player)
+            return;
+
+        PlayerState* state = player->CustomData.GetDefault<PlayerState>(PLAYER_STATE_KEY);
+        ZoneStatus oldStatus = state->status;
+        bool wasInitialized = state->initialized;
+
+        state->status = ComputeZoneStatus(player, zoneId, areaId);
+        state->initialized = true;
+
+        RefreshForcedReactions(player, *state);
+
+        if (!sEnabled || !sPlayerNeutral)
+            return;
+
+        bool playerRulesChanged = !wasInitialized ||
+                                  oldStatus.battleZone != state->status.battleZone ||
+                                  oldStatus.worldPvPZone != state->status.worldPvPZone ||
+                                  (sPlayerNeutralOnlyInCities && oldStatus.neutralArea != state->status.neutralArea);
+
+        if (playerRulesChanged)
+            RefreshPlayerFactionViews(player);
     }
 
     bool ShouldNeutralizeMailbox(Player const* player, GameObject const* go)
@@ -401,16 +411,27 @@ namespace
         if (!sEnabled || !sNeutralMailboxes || !player || !go)
             return false;
 
-        if (player->InBattleground() || player->InArena())
-            return false;
-
         if (go->GetGoType() != GAMEOBJECT_TYPE_MAILBOX)
             return false;
 
-        if (sOnlyInCities && !IsCityAreaForPlayer(player) && !sMailboxIgnoreCityCheck)
+        ZoneStatus status = GetZoneStatus(player);
+        if (status.battleZone)
+            return false;
+
+        if (sOnlyInCities && !status.neutralArea && !sMailboxIgnoreCityCheck)
             return false;
 
         return true;
+    }
+
+    bool IsAllianceFaction(FactionTemplateEntry const* factionTemplate)
+    {
+        return (factionTemplate->ourMask & FACTION_MASK_ALLIANCE) && !(factionTemplate->ourMask & FACTION_MASK_HORDE);
+    }
+
+    bool IsHordeFaction(FactionTemplateEntry const* factionTemplate)
+    {
+        return (factionTemplate->ourMask & FACTION_MASK_HORDE) && !(factionTemplate->ourMask & FACTION_MASK_ALLIANCE);
     }
 
     bool ShouldNeutralizeGameObject(Player const* player, GameObject const* go, uint32 faction)
@@ -418,14 +439,15 @@ namespace
         if (!sEnabled || !sNeutralGameObjects || !player || !go)
             return false;
 
-        if (player->InBattleground() || player->InArena())
-            return false;
-
-        if (sNeutralGameObjectsOnlyInCities && !IsCityAreaForPlayer(player))
-            return false;
-
         // Skip objects that are already neutral / no faction template.
         if (!faction)
+            return false;
+
+        ZoneStatus status = GetZoneStatus(player);
+        if (status.battleZone)
+            return false;
+
+        if (sNeutralGameObjectsOnlyInCities && !status.neutralArea)
             return false;
 
         FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(faction);
@@ -479,11 +501,8 @@ public:
         sEnabled = sConfigMgr->GetOption<bool>("CrossFactionCities.Enable", true);
         sOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.OnlyInCities", true);
         sAllAreasNeutral = sConfigMgr->GetOption<bool>("CrossFactionCities.AllAreasNeutral", false);
-        sIncludeGuards = sConfigMgr->GetOption<bool>("CrossFactionCities.IncludeGuards", true);
-        sUseFactionGroup = sConfigMgr->GetOption<bool>("CrossFactionCities.UseFactionGroup", true);
-        sNeutralizeNonServiceNpcs = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralizeNonServiceNpcs", false);
-        sKeepHostileToBothFactions = sConfigMgr->GetOption<bool>("CrossFactionCities.KeepHostileToBothFactions", true);
-        sFactionRoleAuditLog = sConfigMgr->GetOption<bool>("CrossFactionCities.FactionRoleAuditLog", true);
+        sNeutralInInstances = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralInInstances", false);
+        sWorldPvPZonesHostile = sConfigMgr->GetOption<bool>("CrossFactionCities.WorldPvPZonesHostile", true);
         sClientFactionTemplateId = sConfigMgr->GetOption<uint32>("CrossFactionCities.ClientFactionTemplateId", 0);
         sPlayerNeutral = sConfigMgr->GetOption<bool>("CrossFactionCities.PlayerNeutral", true);
         sPlayerNeutralOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.PlayerNeutralOnlyInCities", false);
@@ -492,23 +511,29 @@ public:
         sNeutralGameObjects = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjects", false);
         sNeutralGameObjectsOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjectsOnlyInCities", false);
         sAllowHostileQuestReputation = sConfigMgr->GetOption<bool>("CrossFactionCities.AllowHostileQuestReputation", false);
-        LoadIdSetFromConfig("CrossFactionCities.AllianceCityFactionIds", sAllianceCityFactionIds);
-        LoadIdSetFromConfig("CrossFactionCities.HordeCityFactionIds", sHordeCityFactionIds);
-        LoadIdSetFromConfig("CrossFactionCities.GuardFactionIds", sGuardFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds);
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
-        LoadIdSetFromConfig("CrossFactionCities.NeverNeutralFactionTemplateIds", sNeverNeutralFactionTemplateIds);
-        LoadIdSetFromConfig("CrossFactionCities.NeverNeutralCreatureEntryIds", sNeverNeutralCreatureEntryIds);
+        LoadIdSetFromConfig("CrossFactionCities.HostileZoneIds", sHostileZoneIds);
+        LoadIdSetFromConfig("CrossFactionCities.HostileAreaIds", sHostileAreaIds);
+        LoadIdSetFromConfig("CrossFactionCities.ExtraAllianceFactionIds", sExtraAllianceFactionIds);
+        LoadIdSetFromConfig("CrossFactionCities.ExtraHordeFactionIds", sExtraHordeFactionIds);
+        LoadIdSetFromConfig("CrossFactionCities.NeverNeutralFactionIds", sNeverNeutralFactionIds);
 
-        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, IncludeGuards={}, UseFactionGroup={}, NeutralizeNonServiceNpcs={}, KeepHostileToBothFactions={}, FactionRoleAuditLog={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, AllianceCityFactionIds={}, HordeCityFactionIds={}, GuardFactionIds={}, NeutralZoneIds={}, NeutralAreaIds={}, NeverNeutralFactionTemplateIds={}, NeverNeutralCreatureEntryIds={}",
+        uint32 npcReactionRank = sConfigMgr->GetOption<uint32>("CrossFactionCities.NpcReactionRank", REP_NEUTRAL);
+        if (npcReactionRank != REP_NEUTRAL && npcReactionRank != REP_FRIENDLY)
+        {
+            LOG_WARN("module", "mod-crossfactioncities: CrossFactionCities.NpcReactionRank must be 3 (neutral) or 4 (friendly), using 3");
+            npcReactionRank = REP_NEUTRAL;
+        }
+        sNpcReactionRank = ReputationRank(npcReactionRank);
+
+        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, NeutralInInstances={}, WorldPvPZonesHostile={}, NpcReactionRank={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, NeutralZoneIds={}, NeutralAreaIds={}, HostileZoneIds={}, HostileAreaIds={}, ExtraAllianceFactionIds={}, ExtraHordeFactionIds={}, NeverNeutralFactionIds={}",
             sEnabled ? 1 : 0,
             sOnlyInCities ? 1 : 0,
             sAllAreasNeutral ? 1 : 0,
-            sIncludeGuards ? 1 : 0,
-            sUseFactionGroup ? 1 : 0,
-            sNeutralizeNonServiceNpcs ? 1 : 0,
-            sKeepHostileToBothFactions ? 1 : 0,
-            sFactionRoleAuditLog ? 1 : 0,
+            sNeutralInInstances ? 1 : 0,
+            sWorldPvPZonesHostile ? 1 : 0,
+            uint32(sNpcReactionRank),
             sClientFactionTemplateId,
             sPlayerNeutral ? 1 : 0,
             sPlayerNeutralOnlyInCities ? 1 : 0,
@@ -517,21 +542,22 @@ public:
             sNeutralGameObjects ? 1 : 0,
             sNeutralGameObjectsOnlyInCities ? 1 : 0,
             sAllowHostileQuestReputation ? 1 : 0,
-            sAllianceCityFactionIds.size(),
-            sHordeCityFactionIds.size(),
-            sGuardFactionIds.size(),
             sNeutralZoneIds.size(),
             sNeutralAreaIds.size(),
-            sNeverNeutralFactionTemplateIds.size(),
-            sNeverNeutralCreatureEntryIds.size());
+            sHostileZoneIds.size(),
+            sHostileAreaIds.size(),
+            sExtraAllianceFactionIds.size(),
+            sExtraHordeFactionIds.size(),
+            sNeverNeutralFactionIds.size());
 
+        // DBC stores are not loaded yet at the first config load; OnStartup builds the lists then.
         if (reload)
-            RebuildFactionRoleAudit();
+            BuildSideFactionLists();
     }
 
     void OnStartup() override
     {
-        RebuildFactionRoleAudit();
+        BuildSideFactionLists();
     }
 };
 
@@ -544,24 +570,12 @@ public:
     {
         Player const* playerA = a ? a->GetCharmerOrOwnerPlayerOrPlayerItself() : nullptr;
         Player const* playerB = b ? b->GetCharmerOrOwnerPlayerOrPlayerItself() : nullptr;
-        Creature const* creatureA = a ? a->ToCreature() : nullptr;
-        Creature const* creatureB = b ? b->ToCreature() : nullptr;
 
+        // Friendly rather than neutral: the core lets anyone attack a neutral player who is PvP
+        // flagged, which would allow PvP the client does not show.
         if (playerA && playerB && ShouldForceNeutralPlayers(playerA, playerB))
         {
-            rank = REP_NEUTRAL;
-            return false;
-        }
-
-        if (playerA && creatureB && ShouldForceNeutral(playerA, creatureB))
-        {
-            rank = REP_NEUTRAL;
-            return false;
-        }
-
-        if (playerB && creatureA && ShouldForceNeutral(playerB, creatureA))
-        {
-            rank = REP_NEUTRAL;
+            rank = REP_FRIENDLY;
             return false;
         }
 
@@ -576,27 +590,16 @@ public:
         if (posPointers.UnitFieldFactionTemplatePos < 0)
             return;
 
-        uint32 clientFactionTemplateId = sClientFactionTemplateId ? sClientFactionTemplateId : target->GetFaction();
+        // Only player-controlled units: NPCs are handled with forced reactions.
+        Player const* owner = unit->GetCharmerOrOwnerPlayerOrPlayerItself();
+        if (!owner || owner == target || !ShouldForceNeutralPlayers(target, owner))
+            return;
 
+        uint32 clientFactionTemplateId = sClientFactionTemplateId ? sClientFactionTemplateId : target->GetFaction();
         if (!clientFactionTemplateId)
             return;
 
-        if (Creature const* creature = unit->ToCreature())
-        {
-            if (!ShouldForceNeutral(target, creature))
-                return;
-
-            valuesUpdateBuf.put(posPointers.UnitFieldFactionTemplatePos, uint32(clientFactionTemplateId));
-            return;
-        }
-
-        if (Player const* otherPlayer = unit->ToPlayer())
-        {
-            if (!ShouldForceNeutralPlayers(target, otherPlayer))
-                return;
-
-            valuesUpdateBuf.put(posPointers.UnitFieldFactionTemplatePos, uint32(clientFactionTemplateId));
-        }
+        valuesUpdateBuf.put(posPointers.UnitFieldFactionTemplatePos, uint32(clientFactionTemplateId));
     }
 };
 
@@ -604,6 +607,17 @@ class CrossFactionCities_PlayerScript final : public PlayerScript
 {
 public:
     CrossFactionCities_PlayerScript() : PlayerScript("CrossFactionCities_PlayerScript") { }
+
+    void OnPlayerLogin(Player* player) override
+    {
+        UpdatePlayerState(player, player->GetZoneId(), player->GetAreaId());
+    }
+
+    void OnPlayerUpdateArea(Player* player, uint32 /*oldArea*/, uint32 newArea) override
+    {
+        // Zone changes also run the area update, so this covers both.
+        UpdatePlayerState(player, player->GetZoneId(), newArea);
+    }
 
     void OnPlayerGiveReputation(Player* player, int32 factionID, float& amount, ReputationSource repSource) override
     {
@@ -646,7 +660,7 @@ class CrossFactionCities_AllGameObjectScript final : public AllGameObjectScript
 public:
     CrossFactionCities_AllGameObjectScript() : AllGameObjectScript("CrossFactionCities_AllGameObjectScript") { }
 
-    void OnGameObjectFactionCalc(GameObject const* go, Player const* viewer, uint32& faction) 
+    void OnGameObjectFactionCalc(GameObject const* go, Player const* viewer, uint32& faction)
     {
         if (!go || !viewer)
             return;

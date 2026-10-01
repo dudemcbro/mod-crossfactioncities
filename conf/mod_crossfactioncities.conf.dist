@@ -4,73 +4,99 @@
 
 CrossFactionCities.Enable = 1
 
-# If enabled, only apply neutrality in areas flagged as capital/city/town in AreaTable.dbc.
+###################################################################################################
+# NPC NEUTRALITY
+#
+# NPCs of the other faction are made neutral with forced reactions: the same mechanism disguise
+# spells use. The server and the client apply them together, so an NPC that looks neutral never
+# attacks and an NPC that looks hostile always does. The reactions are updated when the player
+# changes area.
+#
+# The NPC factions are found automatically: every Faction.dbc faction whose faction templates
+# are all in the Alliance group (or all in the Horde group). The worldserver log lists them at
+# startup ("Alliance NPC factions" / "Horde NPC factions").
+###################################################################################################
+
+# If enabled, NPCs are only neutral in neutral areas: areas flagged as capital, city or town in
+# AreaTable.dbc, plus NeutralZoneIds and NeutralAreaIds.
+# If disabled, NPCs are neutral everywhere (HostileZoneIds and HostileAreaIds still apply).
 CrossFactionCities.OnlyInCities = 1
 
-# If enabled, treat all areas as neutral interaction areas (except battlegrounds/arenas).
+# If enabled, every area counts as a neutral area (also for PlayerNeutralOnlyInCities and the
+# gameobject options).
 CrossFactionCities.AllAreasNeutral = 0
 
-# If enabled, automatically treat creatures flagged as guards as eligible for neutrality.
-CrossFactionCities.IncludeGuards = 1
+# Zone IDs that count as neutral areas.
+# Defaults include all playable race starting zones from playercreateinfo.sql.
+CrossFactionCities.NeutralZoneIds = "1,12,14,85,141,215,3430,3431,3433,3524,3525,3526"
 
-# If enabled, creatures with explicit Alliance/Horde faction-group alignment are eligible.
-# This fills gaps when new city faction templates are added later.
-CrossFactionCities.UseFactionGroup = 1
+# Area IDs that count as neutral areas.
+CrossFactionCities.NeutralAreaIds = ""
 
-# If enabled, allows neutralizing faction-group-derived NPCs even when they have no NPC flags.
-# Keep this disabled to avoid neutralizing most world combat NPCs (guard-like ASSIST_PLAYERS factions are still allowed).
-CrossFactionCities.NeutralizeNonServiceNpcs = 0
+# Zone and area IDs where NPCs always keep their normal hostility, even inside a neutral zone.
+# Use these for quest areas full of enemy NPCs of the other faction.
+# Defaults: 372 Tiragarde Keep (Durotar), 404 Bael'dun Digsite (Mulgore), 2157 Bael'dun Keep (Barrens).
+CrossFactionCities.HostileZoneIds = ""
+CrossFactionCities.HostileAreaIds = "372,404,2157"
 
-# If enabled, keep factions hostile if their faction template is hostile to both Alliance and Horde players.
-CrossFactionCities.KeepHostileToBothFactions = 1
+# If enabled, NPCs are also neutral inside dungeons and raids (when the area rules allow it).
+# Keep this disabled: encounters such as the Icecrown gunship or the Faction Champions use
+# NPCs of the other faction as enemies.
+CrossFactionCities.NeutralInInstances = 0
 
-# If enabled, logs startup/reload audit of faction templates by role usage (mixed-use vs combat-only).
-CrossFactionCities.FactionRoleAuditLog = 1
+# Reaction of the other faction's NPCs in neutral areas.
+# 3 = Neutral: they do not attack, and they can still be attacked (quest targets stay killable).
+# 4 = Friendly: they do not attack and cannot be attacked.
+# Reputation that already gives this reaction or better is used as is.
+CrossFactionCities.NpcReactionRank = 3
 
-# FactionTemplate ID to send to clients for opposing city NPCs.
-# 0 = use the player's own faction template (guarantees no hostile sword icon).
-CrossFactionCities.ClientFactionTemplateId = 0
+# Faction.dbc IDs to add to the Alliance or Horde NPC factions.
+CrossFactionCities.ExtraAllianceFactionIds = ""
+CrossFactionCities.ExtraHordeFactionIds = ""
 
-# Neutralize opposing-faction players (no PvP except duels), to allow normal interaction.
+# Faction.dbc IDs whose NPCs are never made neutral.
+CrossFactionCities.NeverNeutralFactionIds = ""
+
+###################################################################################################
+# PLAYER NEUTRALITY
+###################################################################################################
+
+# Make players of the other faction friendly: no PvP except duels, and they can heal and buff
+# each other. Never applies in battlegrounds, arenas and Wintergrasp.
 CrossFactionCities.PlayerNeutral = 1
 
-# If enabled, only neutralize opposing players in city areas.
+# If enabled, players are only friendly when at least one of them is in a neutral area.
 CrossFactionCities.PlayerNeutralOnlyInCities = 0
 
-# Allow interacting with mailbox NPCs from the opposing faction.
+# If enabled, players can fight in world PvP objective zones (Hellfire Peninsula towers, Halaa,
+# Eastern Plaguelands towers, Silithus, Zangarmarsh, Terokkar, Grizzly Hills).
+CrossFactionCities.WorldPvPZonesHostile = 1
+
+# FactionTemplate ID sent to clients for players (and their pets) of the other faction.
+# 0 = use the viewing player's own faction template.
+CrossFactionCities.ClientFactionTemplateId = 0
+
+###################################################################################################
+# GAMEOBJECTS (need core-gameobject-faction-hook.patch)
+###################################################################################################
+
+# Allow using mailboxes of the other faction.
 CrossFactionCities.NeutralMailboxes = 1
 
-# If enabled, mailbox NPCs ignore the city-only restriction.
+# If enabled, mailboxes work outside neutral areas too.
 CrossFactionCities.MailboxIgnoreCityCheck = 1
 
 # Neutralize opposing-faction-owned gameobjects (chests, cages, etc.) by spoofing the GO faction
 # sent to the client. This makes faction-owned interactables targetable/usable cross-faction.
 CrossFactionCities.NeutralGameObjects = 1
 
-# If enabled, only neutralize gameobjects in areas treated as cities/neutral zones/areas.
+# If enabled, only neutralize gameobjects in neutral areas.
 CrossFactionCities.NeutralGameObjectsOnlyInCities = 0
+
+###################################################################################################
+# REPUTATION
+###################################################################################################
 
 # If enabled, allow gaining reputation from quests even if the rewarded faction is hostile to the player.
 # (AzerothCore normally skips quest reputation rewards for hostile factions.)
 CrossFactionCities.AllowHostileQuestReputation = 0
-
-# Additional zone IDs to treat as neutral interaction areas.
-# Defaults include all playable race starting zones from playercreateinfo.sql.
-CrossFactionCities.NeutralZoneIds = "1,12,14,85,141,215,3430,3431,3433,3524,3525,3526"
-
-# Additional area IDs to treat as neutral interaction areas.
-CrossFactionCities.NeutralAreaIds = ""
-
-# Comma-separated creature_template.faction (FactionTemplate ID) values for opposing-faction city NPCs.
-# Populate these lists with the faction IDs used by civilian/quest/vendor/trainers in the opposing cities.
-CrossFactionCities.AllianceCityFactionIds = ""
-CrossFactionCities.HordeCityFactionIds = ""
-
-# Optional guard/defender faction template IDs (FactionTemplate ID), if guards use a separate faction.
-CrossFactionCities.GuardFactionIds = ""
-
-# FactionTemplate IDs that should never be neutralized by this module.
-CrossFactionCities.NeverNeutralFactionTemplateIds = ""
-
-# creature_template.entry values that should never be neutralized by this module.
-CrossFactionCities.NeverNeutralCreatureEntryIds = ""
