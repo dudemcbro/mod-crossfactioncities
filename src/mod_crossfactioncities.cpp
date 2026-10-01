@@ -8,11 +8,12 @@
 #include "Log.h"
 #include "Map.h"
 #include "OutdoorPvPMgr.h"
-#include "Pet.h"
 #include "Player.h"
 #include "PlayerScript.h"
 #include "ReputationMgr.h"
 #include "SpellAuraEffects.h"
+#include "SpellAuras.h"
+#include "SpellInfo.h"
 #include "Unit.h"
 
 #include <algorithm>
@@ -79,11 +80,11 @@ namespace
             token.pop_back();
     }
 
-    void LoadIdSetFromConfig(char const* key, std::unordered_set<uint32>& out)
+    void LoadIdSetFromConfig(char const* key, std::unordered_set<uint32>& out, std::string const& defaultValue = "")
     {
         out.clear();
 
-        std::string raw = sConfigMgr->GetOption<std::string>(key, "");
+        std::string raw = sConfigMgr->GetOption<std::string>(key, defaultValue);
         std::stringstream ss(raw);
         std::string token;
 
@@ -347,12 +348,17 @@ namespace
         return true;
     }
 
-    void ForceFactionResend(Unit* unit)
+    // Also resends pets, guardians, totems and charmed units, which follow their player's rules.
+    void ForceFactionResend(Player* player)
     {
-        unit->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
-        if (Player* player = unit->ToPlayer())
-            if (Pet* pet = player->GetPet())
-                pet->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
+        player->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
+
+        for (Unit* controlled : player->m_Controlled)
+            if (controlled)
+                controlled->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
+
+        if (Unit* charm = player->GetCharm())
+            charm->ForceValuesUpdateAtIndex(UNIT_FIELD_FACTIONTEMPLATE);
     }
 
     // Faction values only reach a client when they change, so after a player's status changes
@@ -404,6 +410,18 @@ namespace
 
         if (playerRulesChanged)
             RefreshPlayerFactionViews(player);
+    }
+
+    // A spell aura that forced a reaction removes that faction's entry when it ends, so put
+    // the module's reactions back right away instead of at the next area change.
+    void OnForceReactionAuraRemoved(Player* player)
+    {
+        if (!player->IsInWorld())
+            return;
+
+        if (PlayerState* state = player->CustomData.Get<PlayerState>(PLAYER_STATE_KEY))
+            if (state->initialized)
+                RefreshForcedReactions(player, *state);
     }
 
     bool ShouldNeutralizeMailbox(Player const* player, GameObject const* go)
@@ -511,10 +529,11 @@ public:
         sNeutralGameObjects = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjects", false);
         sNeutralGameObjectsOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjectsOnlyInCities", false);
         sAllowHostileQuestReputation = sConfigMgr->GetOption<bool>("CrossFactionCities.AllowHostileQuestReputation", false);
-        LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds);
+        // Defaults match the shipped .conf.dist, for configs that predate an option.
+        LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds, "1,12,14,85,141,215,3430,3431,3433,3524,3525,3526");
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
         LoadIdSetFromConfig("CrossFactionCities.HostileZoneIds", sHostileZoneIds);
-        LoadIdSetFromConfig("CrossFactionCities.HostileAreaIds", sHostileAreaIds);
+        LoadIdSetFromConfig("CrossFactionCities.HostileAreaIds", sHostileAreaIds, "372,404,2157");
         LoadIdSetFromConfig("CrossFactionCities.ExtraAllianceFactionIds", sExtraAllianceFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.ExtraHordeFactionIds", sExtraHordeFactionIds);
         LoadIdSetFromConfig("CrossFactionCities.NeverNeutralFactionIds", sNeverNeutralFactionIds);
@@ -600,6 +619,16 @@ public:
             return;
 
         valuesUpdateBuf.put(posPointers.UnitFieldFactionTemplatePos, uint32(clientFactionTemplateId));
+    }
+
+    void OnAuraRemove(Unit* unit, AuraApplication* aurApp, AuraRemoveMode /*mode*/) override
+    {
+        Player* player = unit ? unit->ToPlayer() : nullptr;
+        if (!player || !aurApp)
+            return;
+
+        if (aurApp->GetBase()->GetSpellInfo()->HasAura(SPELL_AURA_FORCE_REACTION))
+            OnForceReactionAuraRemoved(player);
     }
 };
 
