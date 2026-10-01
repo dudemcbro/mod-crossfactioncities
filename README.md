@@ -215,6 +215,19 @@ request against `main`. Commit messages follow
 `feat: ...`, `docs: ...`). If you change a core patch, check that it still applies
 with `git apply --check` from a clean core checkout.
 
+## Credits
+
+- [mod-Faction-Free](https://github.com/gitdalisar/mod-Faction-Free) by Dalisar
+  (GitHub [gitdalisar](https://github.com/gitdalisar)), AGPL-3.0. Its approach to
+  cross-faction play inspires this module's roadmap: reputation with the other
+  faction, quests, inns, languages, faction-locked gear, PvP flags in enemy
+  capitals, a teleport network and achievements for both factions. Those ideas are
+  re-implemented here on the server side, without client patches; no Faction-Free
+  code or data is included. Each feature that takes an idea from Faction-Free names
+  it here when it is added.
+
 ## License
 
-GNU General Public License v3.0, see [LICENSE](LICENSE).
+GNU Affero General Public License v3.0, see [LICENSE](LICENSE). If you run a
+modified version of this module on a server that players connect to, you must offer
+those players the source code of your version.
