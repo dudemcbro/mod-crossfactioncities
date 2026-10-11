@@ -100,3 +100,39 @@ CrossFactionCities.NeutralGameObjectsOnlyInCities = 0
 # If enabled, allow gaining reputation from quests even if the rewarded faction is hostile to the player.
 # (AzerothCore normally skips quest reputation rewards for hostile factions.)
 CrossFactionCities.AllowHostileQuestReputation = 0
+
+###################################################################################################
+# INNS, LANGUAGES AND NPC SPEECH
+###################################################################################################
+
+# Let players rest in the other faction's inns and rest areas (Northrend inns, the Dalaran
+# pavilions and the like). Takes effect after a worldserver restart.
+CrossFactionCities.NeutralInns = 1
+
+# Languages each player knows, checked at every login:
+# 0 = only the languages of their own race
+# 1 = also the other faction's common language (Orcish for the Alliance, Common for the Horde)
+# 2 = every playable race's language
+# Lowering the value removes the extra languages at the player's next login.
+# Takes effect after a worldserver restart.
+CrossFactionCities.LearnLanguages = 0
+
+# Send NPC speech and gossip text that is in a playable race's language as Universal, so every
+# player can read it. Players' own clients cache gossip text, so clear the client's Cache folder
+# after turning this on.
+CrossFactionCities.NpcSpeechUniversal = 1
+
+###################################################################################################
+# ITEMS AND ACHIEVEMENTS
+###################################################################################################
+
+# Remove the Horde-only and Alliance-only flags and the race limits from items, so every player
+# can equip, use, loot and buy them (faction mounts, PvP gear, faction quest items). Reputation
+# requirements stay. Takes effect after a worldserver restart; players should clear the client's
+# Cache folder so their item tooltips update.
+CrossFactionCities.UnlockFactionItems = 0
+
+# Let players of either faction earn the other faction's achievements. The stock client lists
+# only its own faction's achievements in the achievement window; the server still tracks and
+# awards them. Takes effect after a worldserver restart.
+CrossFactionCities.UnlockFactionAchievements = 0

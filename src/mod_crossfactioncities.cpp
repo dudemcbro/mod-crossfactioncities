@@ -4,19 +4,26 @@
 #include "Config.h"
 #include "DBCStores.h"
 #include "DataMap.h"
+#include "DatabaseEnv.h"
 #include "GameObject.h"
+#include "ItemTemplate.h"
 #include "Log.h"
 #include "Map.h"
+#include "ObjectMgr.h"
+#include "Opcodes.h"
 #include "OutdoorPvPMgr.h"
 #include "Player.h"
 #include "PlayerScript.h"
 #include "ReputationMgr.h"
+#include "ServerScript.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "Unit.h"
+#include "WorldPacket.h"
 
 #include <algorithm>
+#include <cstring>
 #include <exception>
 #include <sstream>
 #include <string>
@@ -40,6 +47,11 @@ namespace
     bool sNeutralGameObjects = false;
     bool sNeutralGameObjectsOnlyInCities = false;
     bool sAllowHostileQuestReputation = false;
+    bool sNeutralInns = true;
+    uint32 sLearnLanguages = 0;
+    bool sNpcSpeechUniversal = true;
+    bool sUnlockFactionItems = false;
+    bool sUnlockFactionAchievements = false;
     std::unordered_set<uint32> sNeutralZoneIds;
     std::unordered_set<uint32> sNeutralAreaIds;
     std::unordered_set<uint32> sHostileZoneIds;
@@ -70,7 +82,36 @@ namespace
         bool initialized = false;
         ZoneStatus status;
         std::unordered_set<uint32> forcedFactionIds;
+        uint32 innCheckTimer = 0;
     };
+
+    // Options that change the server's in-memory game data. They are applied once at startup,
+    // before any player logs in, and keep the values they had then until the next restart.
+    struct StartupOptions
+    {
+        bool neutralInns = false;
+        uint32 learnLanguages = 0;
+        bool unlockFactionItems = false;
+        bool unlockFactionAchievements = false;
+    };
+    StartupOptions sStartupOptions;
+
+    uint32 sPlayableRaceMask = 0;
+
+    // Inn area triggers only the other faction can rest in, indexed by the player's TeamId and map.
+    std::unordered_map<uint32, std::vector<AreaTrigger const*>> sForeignInnsByMap[2];
+    uint32 const INN_CHECK_INTERVAL = 1000;
+
+    struct PlayerLanguage
+    {
+        uint32 langId;
+        uint32 skillId;
+        uint32 spellId;
+        uint32 nativeRaceMask;   // races that know the language without the module
+    };
+    // The languages of the playable races (Common, Orcish, Darnassian and so on).
+    std::vector<PlayerLanguage> sPlayerLanguages;
+    std::unordered_set<uint32> sPlayerLanguageIds;
 
     void Trim(std::string& token)
     {
@@ -507,6 +548,377 @@ namespace
         return (teamId == TEAM_ALLIANCE) ? templateEntry->IsHostileToAlliancePlayers()
                                          : templateEntry->IsHostileToHordePlayers();
     }
+
+    uint32 RaceMask(uint32 race)
+    {
+        return 1u << (race - 1);
+    }
+
+    bool IsPlayableRace(uint32 race)
+    {
+        for (uint32 playerClass = 1; playerClass < MAX_CLASSES; ++playerClass)
+            if (sObjectMgr->GetPlayerInfo(race, playerClass))
+                return true;
+
+        return false;
+    }
+
+    void BuildPlayableRaceMask()
+    {
+        sPlayableRaceMask = 0;
+        for (uint32 race = 1; race < sChrRacesStore.GetNumRows() && race <= 32; ++race)
+            if (IsPlayableRace(race))
+                sPlayableRaceMask |= RaceMask(race);
+    }
+
+    // Collects the SkillRaceClassInfo rows that let a playable race and class know a skill.
+    std::vector<SkillRaceClassInfoEntry const*> GetPlayableSkillRaceClassInfo(uint32 skillId, uint32& raceMask)
+    {
+        std::vector<SkillRaceClassInfoEntry const*> entries;
+        raceMask = 0;
+
+        for (uint32 race = 1; race < sChrRacesStore.GetNumRows() && race <= 32; ++race)
+        {
+            for (uint32 playerClass = 1; playerClass < MAX_CLASSES; ++playerClass)
+            {
+                if (!sObjectMgr->GetPlayerInfo(race, playerClass))
+                    continue;
+
+                SkillRaceClassInfoEntry const* entry = GetSkillRaceClassInfo(skillId, race, playerClass);
+                if (!entry)
+                    continue;
+
+                raceMask |= RaceMask(race);
+                if (std::find(entries.begin(), entries.end(), entry) == entries.end())
+                    entries.push_back(entry);
+            }
+        }
+
+        return entries;
+    }
+
+    void BuildPlayerLanguages()
+    {
+        sPlayerLanguages.clear();
+        sPlayerLanguageIds.clear();
+
+        for (LanguageDesc const& language : lang_description)
+        {
+            if (!language.skill_id || !language.spell_id)
+                continue;
+
+            uint32 nativeRaceMask = 0;
+            GetPlayableSkillRaceClassInfo(language.skill_id, nativeRaceMask);
+            if (!nativeRaceMask)
+                continue;   // Demonic, Draconic, Titan and the like
+
+            sPlayerLanguages.push_back({ uint32(language.lang_id), language.skill_id, language.spell_id, nativeRaceMask });
+            sPlayerLanguageIds.insert(uint32(language.lang_id));
+        }
+    }
+
+    // The other faction's common language: Orcish for the Alliance, Common for the Horde.
+    bool IsLanguageGranted(PlayerLanguage const& language, TeamId team)
+    {
+        switch (sStartupOptions.learnLanguages)
+        {
+            case 1:
+                return language.langId == uint32(team == TEAM_ALLIANCE ? LANG_ORCISH : LANG_COMMON);
+            case 2:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Makes the core accept the granted languages for every race. Without this a language a race
+    // does not speak is dropped from the character when it next logs in.
+    void ApplyLanguageRaceMasks()
+    {
+        uint32 widened = 0;
+        for (PlayerLanguage const& language : sPlayerLanguages)
+        {
+            if (!IsLanguageGranted(language, TEAM_ALLIANCE) && !IsLanguageGranted(language, TEAM_HORDE))
+                continue;
+
+            uint32 raceMask = 0;
+            for (SkillRaceClassInfoEntry const* entry : GetPlayableSkillRaceClassInfo(language.skillId, raceMask))
+            {
+                if (entry->RaceMask)
+                {
+                    const_cast<SkillRaceClassInfoEntry*>(entry)->RaceMask |= sPlayableRaceMask;
+                    ++widened;
+                }
+            }
+        }
+
+        LOG_INFO("module", "mod-crossfactioncities: LearnLanguages={}: {} language skill rows opened to every race", sStartupOptions.learnLanguages, widened);
+    }
+
+    // Grants the languages the options allow and removes other languages the player's race
+    // does not speak, so lowering LearnLanguages takes them away again.
+    void UpdateLanguages(Player* player)
+    {
+        uint32 raceMask = player->getRaceMask();
+        TeamId team = player->GetTeamId(true);
+
+        for (PlayerLanguage const& language : sPlayerLanguages)
+        {
+            if (language.nativeRaceMask & raceMask)
+                continue;
+
+            if (IsLanguageGranted(language, team))
+            {
+                if (!player->HasSkill(language.skillId))
+                    player->SetSkill(language.skillId, 0, 300, 300);
+                if (!player->HasSpell(language.spellId))
+                    player->learnSpell(language.spellId);
+            }
+            else
+            {
+                if (player->HasSkill(language.skillId))
+                    player->SetSkill(language.skillId, 0, 0, 0);
+                if (player->HasSpell(language.spellId))
+                    player->removeSpell(language.spellId, SPEC_MASK_ALL, false);
+            }
+        }
+    }
+
+    // Inns: the other faction's inn area triggers are found here, and a timer in the player
+    // update checks whether the player stands in one (the core ignores them for that player).
+    // Rest areas without a trigger (Northrend inns, Dalaran pavilions) carry an AreaTable flag
+    // per faction, so both flags are set.
+    void ApplyNeutralInns()
+    {
+        for (auto& innsByMap : sForeignInnsByMap)
+            innsByMap.clear();
+
+        uint32 innCount = 0;
+        if (QueryResult result = WorldDatabase.Query("SELECT id FROM areatrigger_tavern"))
+        {
+            do
+            {
+                uint32 triggerId = result->Fetch()[0].Get<uint32>();
+                AreaTrigger const* trigger = sObjectMgr->GetAreaTrigger(triggerId);
+                if (!trigger)
+                    continue;
+
+                bool alliance = sObjectMgr->IsTavernAreaTrigger(triggerId, FACTION_MASK_ALLIANCE);
+                bool horde = sObjectMgr->IsTavernAreaTrigger(triggerId, FACTION_MASK_HORDE);
+                if (alliance == horde)
+                    continue;
+
+                // An Alliance inn is added for Horde players, and the other way round.
+                sForeignInnsByMap[alliance ? TEAM_HORDE : TEAM_ALLIANCE][trigger->map].push_back(trigger);
+                ++innCount;
+            } while (result->NextRow());
+        }
+
+        uint32 const bothRestFlags = AREA_FLAG_REST_ZONE_ALLIANCE | AREA_FLAG_REST_ZONE_HORDE;
+        uint32 areaCount = 0;
+        for (uint32 i = 0; i < sAreaTableStore.GetNumRows(); ++i)
+        {
+            AreaTableEntry const* area = sAreaTableStore.LookupEntry(i);
+            if (!area)
+                continue;
+
+            uint32 restFlags = area->flags & bothRestFlags;
+            if (!restFlags || restFlags == bothRestFlags)
+                continue;
+
+            const_cast<AreaTableEntry*>(area)->flags |= bothRestFlags;
+            ++areaCount;
+        }
+
+        LOG_INFO("module", "mod-crossfactioncities: NeutralInns: {} single-faction inns and {} single-faction rest areas opened to both factions", innCount, areaCount);
+    }
+
+    void UpdateForeignInnRest(Player* player, uint32 diff)
+    {
+        PlayerState* state = player->CustomData.Get<PlayerState>(PLAYER_STATE_KEY);
+        if (!state)
+            return;
+
+        if (state->innCheckTimer > diff)
+        {
+            state->innCheckTimer -= diff;
+            return;
+        }
+        state->innCheckTimer = INN_CHECK_INTERVAL;
+
+        if (player->HasRestFlag(REST_FLAG_IN_TAVERN) || player->IsInFlight())
+            return;
+
+        TeamId team = player->GetTeamId(true);
+        if (team != TEAM_ALLIANCE && team != TEAM_HORDE)
+            return;
+
+        auto itr = sForeignInnsByMap[team].find(player->GetMapId());
+        if (itr == sForeignInnsByMap[team].end())
+            return;
+
+        // The core's own zone update removes the flag again when the player leaves the inn.
+        for (AreaTrigger const* trigger : itr->second)
+        {
+            if (player->IsInAreaTriggerRadius(trigger))
+            {
+                player->SetRestFlag(REST_FLAG_IN_TAVERN, trigger->entry);
+                return;
+            }
+        }
+    }
+
+    // Clears the Horde-only and Alliance-only item flags and widens race limits to every
+    // playable race: equipping, using, looting, buying and vendor lists all read these.
+    void UnlockFactionItems()
+    {
+        ItemFlags2 const factionFlags = ItemFlags2(ITEM_FLAG2_FACTION_HORDE | ITEM_FLAG2_FACTION_ALLIANCE);
+        uint32 count = 0;
+
+        for (ItemTemplate* proto : *sObjectMgr->GetItemTemplateStoreFast())
+        {
+            if (!proto)
+                continue;
+
+            bool factionLocked = (proto->Flags2 & factionFlags) != 0;
+            uint32 allowedRaces = proto->AllowableRace & sPlayableRaceMask;
+            // Items no playable race can use are broken data; leave them as they are.
+            bool raceLocked = allowedRaces && allowedRaces != sPlayableRaceMask;
+            if (!factionLocked && !raceLocked)
+                continue;
+
+            proto->Flags2 = ItemFlags2(proto->Flags2 & ~factionFlags);
+            if (raceLocked)
+                proto->AllowableRace |= sPlayableRaceMask;
+            ++count;
+        }
+
+        LOG_INFO("module", "mod-crossfactioncities: UnlockFactionItems: {} faction or race locked items opened to every race", count);
+    }
+
+    void UnlockFactionAchievements()
+    {
+        uint32 count = 0;
+        for (uint32 i = 0; i < sAchievementStore.GetNumRows(); ++i)
+        {
+            AchievementEntry const* achievement = sAchievementStore.LookupEntry(i);
+            if (!achievement || achievement->requiredFaction == ACHIEVEMENT_FACTION_ANY)
+                continue;
+
+            const_cast<AchievementEntry*>(achievement)->requiredFaction = ACHIEVEMENT_FACTION_ANY;
+            ++count;
+        }
+
+        LOG_INFO("module", "mod-crossfactioncities: UnlockFactionAchievements: {} faction achievements opened to both factions", count);
+    }
+
+    // The startup options as the config sets them now; all off while the module is disabled.
+    StartupOptions ConfiguredStartupOptions()
+    {
+        StartupOptions options;
+        if (!sEnabled)
+            return options;
+
+        options.neutralInns = sNeutralInns;
+        options.learnLanguages = sLearnLanguages;
+        options.unlockFactionItems = sUnlockFactionItems;
+        options.unlockFactionAchievements = sUnlockFactionAchievements;
+        return options;
+    }
+
+    void ApplyStartupOptions()
+    {
+        BuildPlayableRaceMask();
+        BuildPlayerLanguages();
+
+        sStartupOptions = ConfiguredStartupOptions();
+
+        if (sStartupOptions.neutralInns)
+            ApplyNeutralInns();
+        if (sStartupOptions.learnLanguages)
+            ApplyLanguageRaceMasks();
+        if (sStartupOptions.unlockFactionItems)
+            UnlockFactionItems();
+        if (sStartupOptions.unlockFactionAchievements)
+            UnlockFactionAchievements();
+    }
+
+    void WarnIfStartupOptionsChanged()
+    {
+        StartupOptions configured = ConfiguredStartupOptions();
+        if (configured.neutralInns != sStartupOptions.neutralInns ||
+            configured.learnLanguages != sStartupOptions.learnLanguages ||
+            configured.unlockFactionItems != sStartupOptions.unlockFactionItems ||
+            configured.unlockFactionAchievements != sStartupOptions.unlockFactionAchievements)
+            LOG_WARN("module", "mod-crossfactioncities: changes to NeutralInns, LearnLanguages, UnlockFactionItems and UnlockFactionAchievements (and to Enable, for them) take effect after a worldserver restart");
+    }
+
+    bool IsMonsterChat(uint8 chatType)
+    {
+        switch (chatType)
+        {
+            case CHAT_MSG_MONSTER_SAY:
+            case CHAT_MSG_MONSTER_PARTY:
+            case CHAT_MSG_MONSTER_YELL:
+            case CHAT_MSG_MONSTER_WHISPER:
+            case CHAT_MSG_MONSTER_EMOTE:
+            case CHAT_MSG_RAID_BOSS_EMOTE:
+            case CHAT_MSG_RAID_BOSS_WHISPER:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    void MakeLanguageUniversal(WorldPacket& packet, std::size_t pos)
+    {
+        if (pos + sizeof(uint32) <= packet.size() && sPlayerLanguageIds.count(packet.read<uint32>(pos)))
+            packet.put<uint32>(pos, uint32(LANG_UNIVERSAL));
+    }
+
+    // Skips a null-terminated string; returns false if the packet ends first.
+    bool SkipCString(WorldPacket const& packet, std::size_t& pos)
+    {
+        uint8 const* data = packet.contents();
+        while (pos < packet.size())
+            if (data[pos++] == 0)
+                return true;
+
+        return false;
+    }
+
+    // NPC speech and gossip text in a player race language reach the client as Universal, so
+    // every player can read them. This edits the packet as it is sent: the stored texts are not
+    // changed, and the same text is sent the same way to every player.
+    void MakeNpcSpeechUniversal(WorldPacket& packet)
+    {
+        switch (packet.GetOpcode())
+        {
+            case SMSG_MESSAGECHAT:
+                // uint8 chat type, uint32 language, ...
+                if (packet.size() >= 5 && IsMonsterChat(packet.contents()[0]))
+                    MakeLanguageUniversal(packet, 1);
+                break;
+            case SMSG_NPC_TEXT_UPDATE:
+            {
+                // uint32 text id, then per option: float probability, two strings, uint32 language,
+                // three emote pairs.
+                std::size_t pos = sizeof(uint32);
+                for (uint8 i = 0; i < MAX_GOSSIP_TEXT_OPTIONS; ++i)
+                {
+                    pos += sizeof(float);
+                    if (!SkipCString(packet, pos) || !SkipCString(packet, pos))
+                        return;
+
+                    MakeLanguageUniversal(packet, pos);
+                    pos += sizeof(uint32) + MAX_GOSSIP_TEXT_EMOTES * 2 * sizeof(uint32);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
 }
 
 class CrossFactionCities_WorldScript final : public WorldScript
@@ -529,6 +941,11 @@ public:
         sNeutralGameObjects = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjects", false);
         sNeutralGameObjectsOnlyInCities = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralGameObjectsOnlyInCities", false);
         sAllowHostileQuestReputation = sConfigMgr->GetOption<bool>("CrossFactionCities.AllowHostileQuestReputation", false);
+        sNeutralInns = sConfigMgr->GetOption<bool>("CrossFactionCities.NeutralInns", true);
+        sLearnLanguages = sConfigMgr->GetOption<uint32>("CrossFactionCities.LearnLanguages", 0);
+        sNpcSpeechUniversal = sConfigMgr->GetOption<bool>("CrossFactionCities.NpcSpeechUniversal", true);
+        sUnlockFactionItems = sConfigMgr->GetOption<bool>("CrossFactionCities.UnlockFactionItems", false);
+        sUnlockFactionAchievements = sConfigMgr->GetOption<bool>("CrossFactionCities.UnlockFactionAchievements", false);
         // Defaults match the shipped .conf.dist, for configs that predate an option.
         LoadIdSetFromConfig("CrossFactionCities.NeutralZoneIds", sNeutralZoneIds, "1,12,14,85,141,215,3430,3431,3433,3524,3525,3526");
         LoadIdSetFromConfig("CrossFactionCities.NeutralAreaIds", sNeutralAreaIds);
@@ -546,7 +963,13 @@ public:
         }
         sNpcReactionRank = ReputationRank(npcReactionRank);
 
-        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, NeutralInInstances={}, WorldPvPZonesHostile={}, NpcReactionRank={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, NeutralZoneIds={}, NeutralAreaIds={}, HostileZoneIds={}, HostileAreaIds={}, ExtraAllianceFactionIds={}, ExtraHordeFactionIds={}, NeverNeutralFactionIds={}",
+        if (sLearnLanguages > 2)
+        {
+            LOG_WARN("module", "mod-crossfactioncities: CrossFactionCities.LearnLanguages must be 0, 1 or 2, using 0");
+            sLearnLanguages = 0;
+        }
+
+        LOG_INFO("module", "mod-crossfactioncities: Enable={}, OnlyInCities={}, AllAreasNeutral={}, NeutralInInstances={}, WorldPvPZonesHostile={}, NpcReactionRank={}, ClientFactionTemplateId={}, PlayerNeutral={}, PlayerNeutralOnlyInCities={}, NeutralMailboxes={}, MailboxIgnoreCityCheck={}, NeutralGameObjects={}, NeutralGameObjectsOnlyInCities={}, AllowHostileQuestReputation={}, NeutralInns={}, LearnLanguages={}, NpcSpeechUniversal={}, UnlockFactionItems={}, UnlockFactionAchievements={}, NeutralZoneIds={}, NeutralAreaIds={}, HostileZoneIds={}, HostileAreaIds={}, ExtraAllianceFactionIds={}, ExtraHordeFactionIds={}, NeverNeutralFactionIds={}",
             sEnabled ? 1 : 0,
             sOnlyInCities ? 1 : 0,
             sAllAreasNeutral ? 1 : 0,
@@ -561,6 +984,11 @@ public:
             sNeutralGameObjects ? 1 : 0,
             sNeutralGameObjectsOnlyInCities ? 1 : 0,
             sAllowHostileQuestReputation ? 1 : 0,
+            sNeutralInns ? 1 : 0,
+            sLearnLanguages,
+            sNpcSpeechUniversal ? 1 : 0,
+            sUnlockFactionItems ? 1 : 0,
+            sUnlockFactionAchievements ? 1 : 0,
             sNeutralZoneIds.size(),
             sNeutralAreaIds.size(),
             sHostileZoneIds.size(),
@@ -571,12 +999,16 @@ public:
 
         // DBC stores are not loaded yet at the first config load; OnStartup builds the lists then.
         if (reload)
+        {
             BuildSideFactionLists();
+            WarnIfStartupOptionsChanged();
+        }
     }
 
     void OnStartup() override
     {
         BuildSideFactionLists();
+        ApplyStartupOptions();
     }
 };
 
@@ -640,6 +1072,15 @@ public:
     void OnPlayerLogin(Player* player) override
     {
         UpdatePlayerState(player, player->GetZoneId(), player->GetAreaId());
+
+        if (sEnabled)
+            UpdateLanguages(player);
+    }
+
+    void OnPlayerUpdate(Player* player, uint32 diff) override
+    {
+        if (sEnabled && sStartupOptions.neutralInns)
+            UpdateForeignInnRest(player, diff);
     }
 
     void OnPlayerUpdateArea(Player* player, uint32 /*oldArea*/, uint32 newArea) override
@@ -707,9 +1148,25 @@ public:
     }
 };
 
+class CrossFactionCities_ServerScript final : public ServerScript
+{
+public:
+    CrossFactionCities_ServerScript() : ServerScript("CrossFactionCities_ServerScript", { SERVERHOOK_CAN_PACKET_SEND }) { }
+
+    bool CanPacketSend(WorldSession* /*session*/, WorldPacket const& packet) override
+    {
+        // The packets edited here are built for sending and not read again by the server.
+        if (sEnabled && sNpcSpeechUniversal)
+            MakeNpcSpeechUniversal(const_cast<WorldPacket&>(packet));
+
+        return true;
+    }
+};
+
 void Addmod_crossfactioncitiesScripts()
 {
     new CrossFactionCities_WorldScript();
+    new CrossFactionCities_ServerScript();
     new CrossFactionCities_UnitScript();
     new CrossFactionCities_PlayerScript();
     new CrossFactionCities_AllGameObjectScript();
