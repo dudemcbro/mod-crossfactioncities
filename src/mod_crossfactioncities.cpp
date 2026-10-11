@@ -31,6 +31,9 @@
 #include <unordered_set>
 #include <vector>
 
+// Defined in DBCStores.cpp; the language feature needs every row, not one lookup result.
+extern DBCStorage<SkillRaceClassInfoEntry> sSkillRaceClassInfoStore;
+
 namespace
 {
     bool sEnabled = true;
@@ -107,7 +110,8 @@ namespace
         uint32 langId;
         uint32 skillId;
         uint32 spellId;
-        uint32 nativeRaceMask;   // races that know the language without the module
+        uint32 nativeRaceMask;      // races that know the language without the module
+        uint32 dbcNativeRaceMask;   // races in its SkillRaceClassInfo rows for native speakers
     };
     // The languages of the playable races (Common, Orcish, Darnassian and so on).
     std::vector<PlayerLanguage> sPlayerLanguages;
@@ -571,32 +575,31 @@ namespace
                 sPlayableRaceMask |= RaceMask(race);
     }
 
-    // Collects the SkillRaceClassInfo rows that let a playable race and class know a skill.
-    std::vector<SkillRaceClassInfoEntry const*> GetPlayableSkillRaceClassInfo(uint32 skillId, uint32& raceMask)
+    // A language is a player language when some race learns it at character creation
+    // (playercreateinfo_skills). Demonic, Draconic, Titan and the like are not.
+    uint32 GetCreationRaceMask(uint32 skillId)
     {
-        std::vector<SkillRaceClassInfoEntry const*> entries;
-        raceMask = 0;
-
+        uint32 raceMask = 0;
         for (uint32 race = 1; race < sChrRacesStore.GetNumRows() && race <= 32; ++race)
         {
             for (uint32 playerClass = 1; playerClass < MAX_CLASSES; ++playerClass)
             {
-                if (!sObjectMgr->GetPlayerInfo(race, playerClass))
+                PlayerInfo const* info = sObjectMgr->GetPlayerInfo(race, playerClass);
+                if (!info)
                     continue;
 
-                SkillRaceClassInfoEntry const* entry = GetSkillRaceClassInfo(skillId, race, playerClass);
-                if (!entry)
-                    continue;
-
-                raceMask |= RaceMask(race);
-                if (std::find(entries.begin(), entries.end(), entry) == entries.end())
-                    entries.push_back(entry);
+                for (PlayerCreateInfoSkill const& skill : info->skills)
+                    if (skill.SkillId == skillId)
+                        raceMask |= RaceMask(race);
             }
         }
 
-        return entries;
+        return raceMask;
     }
 
+    // Each language has two kinds of SkillRaceClassInfo rows: one for its native speakers
+    // (no skill tier, the language range) and one that lets the other races hold it too
+    // (with a skill tier, used for languages learned later).
     void BuildPlayerLanguages()
     {
         sPlayerLanguages.clear();
@@ -607,12 +610,18 @@ namespace
             if (!language.skill_id || !language.spell_id)
                 continue;
 
-            uint32 nativeRaceMask = 0;
-            GetPlayableSkillRaceClassInfo(language.skill_id, nativeRaceMask);
-            if (!nativeRaceMask)
-                continue;   // Demonic, Draconic, Titan and the like
+            uint32 creationRaceMask = GetCreationRaceMask(language.skill_id);
+            if (!creationRaceMask)
+                continue;
 
-            sPlayerLanguages.push_back({ uint32(language.lang_id), language.skill_id, language.spell_id, nativeRaceMask });
+            uint32 dbcNativeRaceMask = 0;
+            for (SkillRaceClassInfoEntry const* entry : sSkillRaceClassInfoStore)
+                if (entry->SkillID == language.skill_id && !entry->SkillTierID)
+                    dbcNativeRaceMask |= entry->RaceMask ? entry->RaceMask : sPlayableRaceMask;
+
+            dbcNativeRaceMask &= sPlayableRaceMask;
+            sPlayerLanguages.push_back({ uint32(language.lang_id), language.skill_id, language.spell_id,
+                                         creationRaceMask | dbcNativeRaceMask, dbcNativeRaceMask });
             sPlayerLanguageIds.insert(uint32(language.lang_id));
         }
     }
@@ -631,28 +640,41 @@ namespace
         }
     }
 
-    // Makes the core accept the granted languages for every race. Without this a language a race
-    // does not speak is dropped from the character when it next logs in.
-    void ApplyLanguageRaceMasks()
+    // The core drops a skill at login when no SkillRaceClassInfo row allows it for the
+    // character's race and class. The rows for other races already exist, but leave out
+    // Death Knights, and Thalassian's also lists Blood Elves, which makes the core's lookup
+    // for them ambiguous. So the other-race rows of the granted languages are opened to
+    // every class and limited to the races that are not native speakers.
+    void ApplyLanguageSkillRows()
     {
-        uint32 widened = 0;
+        uint32 changed = 0;
         for (PlayerLanguage const& language : sPlayerLanguages)
         {
             if (!IsLanguageGranted(language, TEAM_ALLIANCE) && !IsLanguageGranted(language, TEAM_HORDE))
                 continue;
 
-            uint32 raceMask = 0;
-            for (SkillRaceClassInfoEntry const* entry : GetPlayableSkillRaceClassInfo(language.skillId, raceMask))
+            bool hasOtherRaceRow = false;
+            for (SkillRaceClassInfoEntry const* entry : sSkillRaceClassInfoStore)
             {
-                if (entry->RaceMask)
-                {
-                    const_cast<SkillRaceClassInfoEntry*>(entry)->RaceMask |= sPlayableRaceMask;
-                    ++widened;
-                }
+                if (entry->SkillID != language.skillId || !entry->SkillTierID)
+                    continue;
+
+                uint32 races = (entry->RaceMask ? entry->RaceMask : sPlayableRaceMask) & ~language.dbcNativeRaceMask;
+                if (!races)
+                    continue;
+
+                SkillRaceClassInfoEntry* row = const_cast<SkillRaceClassInfoEntry*>(entry);
+                row->RaceMask = races;
+                row->ClassMask = 0;
+                hasOtherRaceRow = true;
+                ++changed;
             }
+
+            if (!hasOtherRaceRow)
+                LOG_WARN("module", "mod-crossfactioncities: language skill {} has no SkillRaceClassInfo row for other races; the core will remove it at login", language.skillId);
         }
 
-        LOG_INFO("module", "mod-crossfactioncities: LearnLanguages={}: {} language skill rows opened to every race", sStartupOptions.learnLanguages, widened);
+        LOG_INFO("module", "mod-crossfactioncities: LearnLanguages={}: {} language skill rows opened to every class", sStartupOptions.learnLanguages, changed);
     }
 
     // Grants the languages the options allow and removes other languages the player's race
@@ -836,7 +858,7 @@ namespace
         if (sStartupOptions.neutralInns)
             ApplyNeutralInns();
         if (sStartupOptions.learnLanguages)
-            ApplyLanguageRaceMasks();
+            ApplyLanguageSkillRows();
         if (sStartupOptions.unlockFactionItems)
             UnlockFactionItems();
         if (sStartupOptions.unlockFactionAchievements)
