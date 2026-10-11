@@ -6,3 +6,6 @@ build/
 
 # Local config copies; only the .conf.dist template is tracked
 conf/*.conf
+
+# Python bytecode from the tests and tools
+__pycache__/
