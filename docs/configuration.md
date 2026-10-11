@@ -76,7 +76,7 @@ in the `.conf.dist`.
 | Option | Shipped | What it does |
 | --- | --- | --- |
 | `CrossFactionCities.UnlockFactionItems` | `0` | Removes the faction flags and race limits from items: faction mounts, PvP gear and faction quest items can be equipped, used, looted and bought by everyone. Reputation requirements stay. Restart to change. |
-| `CrossFactionCities.UnlockFactionAchievements` | `0` | Either faction can earn the other faction's achievements. The stock client does not list them in its achievement window. Restart to change. |
+| `CrossFactionCities.UnlockFactionAchievements` | `0` | Either faction can earn the other faction's achievements. The stock client lists them in its achievement window only with the optional [client patch](client-patch.md). Restart to change. |
 
 ## Example setups
 

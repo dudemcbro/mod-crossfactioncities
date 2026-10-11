@@ -20,7 +20,10 @@
     one first.
 
 No client changes are needed. Players only need to clear their client's `Cache` folder
-after you turn on `NpcSpeechUniversal` or `UnlockFactionItems`.
+after you turn on `NpcSpeechUniversal` or `UnlockFactionItems`. With
+`UnlockFactionAchievements`, players can optionally build a patch from their own client
+so the other faction's achievements show in the achievement window
+([client-patch.md](client-patch.md)).
 
 ## Steps
 

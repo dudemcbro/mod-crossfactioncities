@@ -1,9 +1,10 @@
 # How it works
 
 This page explains what the module changes inside the server for each feature. Every
-feature works on the server side only: no client patch, no DBC files and no database
-tables are changed (apart from the optional quest SQL in
-[installation.md](installation.md#database-setup)).
+feature works on the server side only: no DBC files and no database tables are changed
+(apart from the optional quest SQL in
+[installation.md](installation.md#database-setup)), and the one client patch is
+optional ([client-patch.md](client-patch.md)).
 
 The module changes two kinds of things:
 
@@ -99,20 +100,23 @@ The worldserver log shows how many inns and rest areas were opened.
 
 ## Languages (`LearnLanguages`)
 
-Languages are skills. The core keeps a table (SkillRaceClassInfo.dbc) of which races may
-have each skill, and it deletes any skill a character's race may not have each time the
-character logs in. So learning a language alone is not enough: it would be gone at the
-next login.
+Languages are skills. The core keeps a table (SkillRaceClassInfo.dbc) of which races and
+classes may have each skill, and it deletes a skill from a character at login when no row
+allows it. Each language has two kinds of rows: one for its native speakers, and one that
+lets the other races hold it as a learned skill. The stock rows for other races leave out
+Death Knights, and Thalassian's also lists Blood Elves, so the core's lookup for a Blood
+Elf can land on either row.
 
-- At startup the module finds the playable race languages (Common, Orcish, Darnassian,
-  Dwarvish, Gnomish, Draenei, Taurahe, Gutterspeak, Troll, Thalassian) and which races
-  speak each one natively.
-- For the languages the option grants, it opens their SkillRaceClassInfo rows to every
-  playable race, in the server's loaded copy of the DBC.
-- At every login it gives the player each granted language (skill and spell) and
-  removes the languages their race does not speak natively and the option does not
-  grant. Lowering `LearnLanguages` and restarting therefore takes the languages away
-  again at the players' next login.
+- At startup the module finds the playable race languages: the language skills some race
+  gets at character creation (`playercreateinfo_skills`). They are Common, Orcish,
+  Darnassian, Dwarvish, Gnomish, Draenei, Taurahe, Gutterspeak, Troll and Thalassian.
+- For the languages the option grants, it opens their "other races" rows to every class
+  and limits them to the races that are not native speakers, in the server's loaded copy
+  of the DBC. Native speakers keep using their own row.
+- At every login it gives the player each granted language (skill and spell) and removes
+  the languages their race does not speak natively and the option does not grant.
+  Lowering `LearnLanguages` and restarting therefore takes the languages away again at
+  the players' next login.
 
 | `LearnLanguages` | Alliance players also learn | Horde players also learn |
 | --- | --- | --- |
@@ -168,8 +172,10 @@ own faction.
 
 The stock client reads its own Achievement.dbc to build the achievement window, and it
 lists only the player's own faction's achievements there. Achievements of the other
-faction are still earned, saved and announced, but do not show in that window without a
-client patch.
+faction are still earned and saved, and the server sends the usual "achievement earned"
+message, but they do not show in that window unless the player installs the optional
+patch from `tools/achievement_patch.py` ([client-patch.md](client-patch.md)), which marks
+every achievement as both factions in the client's copy.
 
 ## Startup-only options
 

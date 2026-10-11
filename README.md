@@ -4,7 +4,8 @@ An [AzerothCore](https://www.azerothcore.org/) (WotLK 3.3.5a) module that lets t
 Alliance and the Horde share the world. Cities become neutral ground, and optional
 features remove faction limits from inns, languages, NPC speech, items and achievements.
 Everything runs on the server: players use a stock client, and no DBC files or database
-tables are changed.
+tables are changed. The only client patch is optional and built by each player from
+their own client.
 
 ## Features
 
@@ -20,7 +21,9 @@ tables are changed.
 - **Languages:** learn the other faction's language, or every race language.
 - **NPC speech:** NPC chat and gossip text readable by everyone.
 - **Faction-locked items:** faction mounts, PvP gear and quest items for everyone.
-- **Achievements:** either faction can earn the other faction's achievements.
+- **Achievements:** either faction can earn the other faction's achievements, with an
+  optional client patch, built from each player's own client, to list them in the
+  achievement window.
 
 Each feature can be turned on or off in `mod_crossfactioncities.conf`.
 
@@ -47,6 +50,8 @@ quest SQL and uninstalling are in [docs/installation.md](docs/installation.md).
 | [Configuration](docs/configuration.md) | Every option, when changes apply, example setups |
 | [How it works](docs/how-it-works.md) | What each feature changes inside the server |
 | [Compatibility](docs/compatibility.md) | Client cache, worldserver.conf settings, other modules |
+| [Achievement client patch](docs/client-patch.md) | The optional patch that shows the other faction's achievements |
+| [Testing](docs/testing.md) | The live server test and the client patch test |
 | [Compared with mod-Faction-Free](docs/comparison-faction-free.md) | How the two modules differ and which one to choose |
 | [Core patches](patches/NOTE.md) | What each patch adds and how to check it against your core |
 
@@ -56,8 +61,8 @@ quest SQL and uninstalling are in [docs/installation.md](docs/installation.md).
 friendly everywhere by replacing DBC files, patching every client and rewriting world
 database tables. This module does it at runtime instead: per area, feature by feature,
 with stock clients, and it can be switched off again without restoring backups. The
-trade-off is that the other faction's achievements stay hidden in the stock client's
-achievement window, and there is no teleport network. See the
+other faction's achievements need an optional patch, which each player builds from their
+own client, to show in the achievement window, and there is no teleport network. See the
 [full comparison](docs/comparison-faction-free.md).
 
 ## Contributing

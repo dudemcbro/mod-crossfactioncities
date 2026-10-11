@@ -16,13 +16,17 @@
 
 ## Client
 
-- No client patch is needed for any feature.
+- No client patch is needed for any feature. The optional achievement patch
+  ([client-patch.md](client-patch.md)) only adds the other faction's achievements to the
+  achievement window.
 - Clients cache item data and gossip text. After turning on `UnlockFactionItems` or
   `NpcSpeechUniversal`, players should delete the client's `Cache` folder, or tooltips
   and gossip text they have already seen stay as they were.
 - The stock client lists only its own faction's achievements in the achievement window.
   With `UnlockFactionAchievements` the other faction's achievements are still tracked,
-  earned and announced, and count for the server, but stay hidden in that window.
+  earned and saved, and the server sends the usual "achievement earned" message, but
+  they stay hidden in that window unless the player installs the optional achievement
+  patch.
 - Some clients hide faction-locked taxi nodes entirely (for example the Azuremyst and
   Bloodmyst flight points for Horde). If the flight map is empty there, apply the
   gossip fallback patch.
