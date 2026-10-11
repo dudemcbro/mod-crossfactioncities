@@ -1171,12 +1171,20 @@ public:
     }
 };
 
+// ServerScript::CanPacketSend takes WorldPacket const& in current cores and WorldPacket& in
+// older ones (and in some forks). The packet type is taken from the core's declaration so the
+// override matches either.
+template <typename Hook> struct CanPacketSendPacket;
+template <typename Script> struct CanPacketSendPacket<bool (Script::*)(WorldSession*, WorldPacket&)> { using Type = WorldPacket&; };
+template <typename Script> struct CanPacketSendPacket<bool (Script::*)(WorldSession*, WorldPacket const&)> { using Type = WorldPacket const&; };
+using SentPacket = CanPacketSendPacket<decltype(&ServerScript::CanPacketSend)>::Type;
+
 class CrossFactionCities_ServerScript final : public ServerScript
 {
 public:
     CrossFactionCities_ServerScript() : ServerScript("CrossFactionCities_ServerScript", { SERVERHOOK_CAN_PACKET_SEND }) { }
 
-    bool CanPacketSend(WorldSession* /*session*/, WorldPacket const& packet) override
+    bool CanPacketSend(WorldSession* /*session*/, SentPacket packet) override
     {
         // The packets edited here are built for sending and not read again by the server.
         if (sEnabled && sNpcSpeechUniversal)
