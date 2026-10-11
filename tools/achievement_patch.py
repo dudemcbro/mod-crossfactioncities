@@ -312,17 +312,19 @@ def find_entry(directory, name):
 
 
 def find_locales(data_dir):
-    return sorted(entry for entry in os.listdir(data_dir)
-                  if re.fullmatch(r"[a-z]{2}[A-Z]{2}", entry) and os.path.isdir(os.path.join(data_dir, entry)))
+    """{locale: folder path}, with the locale in the client's own spelling (enUS) whatever the
+    folder's case (Linux installs often have data/enus)."""
+    return {entry[:2].lower() + entry[2:].upper(): os.path.join(data_dir, entry)
+            for entry in sorted(os.listdir(data_dir))
+            if re.fullmatch(r"[a-zA-Z]{4}", entry) and os.path.isdir(os.path.join(data_dir, entry))}
 
 
 PATCH_SUFFIXES = "23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
-def archives_in_load_order(data_dir, locale):
+def archives_in_load_order(data_dir, locale, locale_dir):
     """Every archive name the client loads, lowest priority first, as paths (existing or not).
     Later archives override earlier ones."""
-    locale_dir = os.path.join(data_dir, locale)
     names = [(data_dir, n) for n in ("common.MPQ", "common-2.MPQ", "expansion.MPQ", "lichking.MPQ")]
     names += [(locale_dir, n % locale) for n in ("locale-%s.MPQ", "speech-%s.MPQ", "expansion-locale-%s.MPQ",
                                                  "lichking-locale-%s.MPQ", "expansion-speech-%s.MPQ",
@@ -355,10 +357,11 @@ def main():
         raise PatchError("no Data folder in %s" % args.client)
 
     locales = find_locales(data_dir)
-    locale = args.locale or (locales[0] if len(locales) == 1 else None)
+    locale = args.locale or (next(iter(locales)) if len(locales) == 1 else None)
     if not locale:
         raise PatchError("several locales found (%s), choose one with --locale" % ", ".join(locales) if locales
                          else "no locale folder (such as enUS) found in Data")
+    locale = locale[:2].lower() + locale[2:].upper()
     if locale not in locales:
         raise PatchError("locale %s not found in Data" % locale)
 
@@ -366,7 +369,7 @@ def main():
     if len(suffix) != 1 or suffix not in PATCH_SUFFIXES[2:]:
         raise PatchError("--patch-number must be one of 4-9 or A-Z")
     patch_name = "patch-%s-%s.MPQ" % (locale, suffix)
-    archives = archives_in_load_order(data_dir, locale)
+    archives = archives_in_load_order(data_dir, locale, locales[locale])
     patch_index = [os.path.basename(path).lower() for path in archives].index(patch_name.lower())
     patch_path = archives[patch_index]
     patch_exists = os.path.exists(patch_path)

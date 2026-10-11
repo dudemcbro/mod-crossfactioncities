@@ -51,6 +51,9 @@ Wrote /path/to/World of Warcraft/Data/enUS/patch-enUS-4.MPQ. Restart the client 
 | `--locale deDE` | Picks the locale when the client has more than one. |
 | `--patch-number 5` | Writes `patch-<locale>-5.MPQ` instead (4 to 9 or A to Z). |
 
+Folder and archive names are matched in any case, so a Linux install with `data/enus`
+works too.
+
 Run the script again after you change or update the client's other patches; it replaces
 its own patch.
 
