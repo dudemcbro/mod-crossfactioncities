@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
-"""Build the optional client patch for CrossFactionCities.UnlockFactionAchievements.
+"""Build the optional client patch for mod-crossfactioncities.
 
-The stock client lists only its own faction's achievements in the achievement window,
-because Achievement.dbc marks many of them as Alliance-only or Horde-only. This script
-reads Achievement.dbc from your own client's MPQ archives, marks every achievement as
-"both factions" and writes it into a small patch MPQ in the client's locale folder.
+The stock client checks two things on its own, from its own DBC files:
+
+- Achievement.dbc marks many achievements as Alliance-only or Horde-only, and the
+  achievement window lists only the player's own faction's achievements
+  (CrossFactionCities.UnlockFactionAchievements).
+- SkillLineAbility.dbc and SkillRaceClassInfo.dbc tie each race language to its native
+  races (and leave out Death Knights), and the client only offers a language when they
+  allow it for the player's race and class, whatever the server grants
+  (CrossFactionCities.LearnLanguages).
+
+This script reads those files from your own client's MPQ archives, marks every
+achievement as "both factions", opens the race languages to every race and class, and
+writes the result into a small patch MPQ in the client's Data folder.
 
 No game data ships with the module: the patch is built from the client it is installed
 into. Python 3.8 or newer, standard library only.
 
 Usage:
-    python3 achievement_patch.py "/path/to/World of Warcraft"        build and install
-    python3 achievement_patch.py "/path/to/World of Warcraft" --check report only
-    python3 achievement_patch.py "/path/to/World of Warcraft" --remove
+    python3 client_patch.py "/path/to/World of Warcraft"        build and install
+    python3 client_patch.py "/path/to/World of Warcraft" --check report only
+    python3 client_patch.py "/path/to/World of Warcraft" --remove
 
 See docs/client-patch.md for details.
 """
@@ -26,15 +35,27 @@ import struct
 import sys
 import zlib
 
-DBC_PATH = "DBFilesClient\\Achievement.dbc"
-DEFAULT_PATCH_NUMBER = "4"
+ACHIEVEMENT_DBC = "DBFilesClient\\Achievement.dbc"
+SKILL_LINE_DBC = "DBFilesClient\\SkillLine.dbc"
+SKILL_LINE_ABILITY_DBC = "DBFilesClient\\SkillLineAbility.dbc"
+SKILL_RACE_CLASS_INFO_DBC = "DBFilesClient\\SkillRaceClassInfo.dbc"
+PATCHED_FILES = (ACHIEVEMENT_DBC, SKILL_LINE_ABILITY_DBC, SKILL_RACE_CLASS_INFO_DBC)
 # Written into every patch this script builds, so it only ever replaces its own files.
 MARKER_PATH = "mod-crossfactioncities.txt"
-MARKER_TEXT = b"Built by mod-crossfactioncities tools/achievement_patch.py\r\n"
+MARKER_TEXT = b"Built by mod-crossfactioncities tools/client_patch.py\r\n"
 
-ACHIEVEMENT_FIELD_COUNT = 62
-FACTION_FIELD_OFFSET = 4          # field 1, after the uint32 ID
+# WotLK 3.3.5 DBC layouts: field counts and the fields used here.
+ACHIEVEMENT_FIELDS = 62
+ACHIEVEMENT_FACTION = 1           # -1 both, 0 Horde, 1 Alliance
 FACTION_BOTH = -1
+SKILL_LINE_FIELDS = 56
+SKILL_LINE_CATEGORY = 1
+SKILL_CATEGORY_LANGUAGES = 10
+SKILL_LINE_ABILITY_FIELDS = 14
+ABILITY_SKILL, ABILITY_RACE_MASK = 1, 3
+SKILL_RACE_CLASS_INFO_FIELDS = 8
+INFO_SKILL, INFO_RACE_MASK, INFO_CLASS_MASK, INFO_SKILL_TIER = 1, 2, 3, 6
+PLAYABLE_RACE_MASK = 0x6FF        # races 1-8, 10 and 11
 
 # MPQ file flags
 MPQ_FILE_IMPLODE = 0x00000100
@@ -280,24 +301,78 @@ def write_mpq(path, files):
     os.replace(temp_path, path)
 
 
-def patch_achievement_dbc(data):
-    """Returns (patched data, number of achievements changed)."""
-    if len(data) < 20:
-        raise PatchError("Achievement.dbc is too short")
-    magic, record_count, field_count, record_size, string_size = struct.unpack_from("<4sIIII", data)
-    if magic != b"WDBC" or field_count != ACHIEVEMENT_FIELD_COUNT or record_size != field_count * 4:
-        raise PatchError("Achievement.dbc is not the WotLK 3.3.5 layout (%d fields)" % field_count)
-    if len(data) != 20 + record_count * record_size + string_size:
-        raise PatchError("Achievement.dbc size does not match its header")
+class Dbc:
+    """A WDBC file whose records are read and written as uint32 fields."""
 
-    patched = bytearray(data)
+    def __init__(self, name, data, field_count):
+        short = name.split("\\")[-1]
+        if len(data) < 20:
+            raise PatchError("%s is too short" % short)
+        magic, self.count, fields, record_size, string_size = struct.unpack_from("<4sIIII", data)
+        if magic != b"WDBC" or fields != field_count or record_size != field_count * 4:
+            raise PatchError("%s is not the WotLK 3.3.5 layout (%d fields)" % (short, fields))
+        if len(data) != 20 + self.count * record_size + string_size:
+            raise PatchError("%s size does not match its header" % short)
+        self.data = bytearray(data)
+        self.fields = field_count
+
+    def get(self, row, field):
+        return struct.unpack_from("<I", self.data, 20 + (row * self.fields + field) * 4)[0]
+
+    def set(self, row, field, value):
+        """Sets a field, returns True when it changed."""
+        if self.get(row, field) == value & MASK32:
+            return False
+        struct.pack_into("<I", self.data, 20 + (row * self.fields + field) * 4, value & MASK32)
+        return True
+
+
+def patch_achievements(data):
+    """Every achievement for both factions. Returns (patched data, achievements changed)."""
+    dbc = Dbc(ACHIEVEMENT_DBC, data, ACHIEVEMENT_FIELDS)
+    changed = sum(dbc.set(row, ACHIEVEMENT_FACTION, FACTION_BOTH) for row in range(dbc.count))
+    return bytes(dbc.data), changed
+
+
+def race_languages(skill_line_data, info_data):
+    """{skill: native race mask} of the race languages: skills in the languages category
+    with a native speaker row (no skill tier) that does not cover every playable race."""
+    skill_line = Dbc(SKILL_LINE_DBC, skill_line_data, SKILL_LINE_FIELDS)
+    languages = {skill_line.get(row, 0) for row in range(skill_line.count)
+                 if skill_line.get(row, SKILL_LINE_CATEGORY) == SKILL_CATEGORY_LANGUAGES}
+    info = Dbc(SKILL_RACE_CLASS_INFO_DBC, info_data, SKILL_RACE_CLASS_INFO_FIELDS)
+    native = {}
+    for row in range(info.count):
+        skill = info.get(row, INFO_SKILL)
+        if skill in languages and not info.get(row, INFO_SKILL_TIER):
+            native[skill] = native.get(skill, 0) | (info.get(row, INFO_RACE_MASK) or PLAYABLE_RACE_MASK)
+    return {skill: mask & PLAYABLE_RACE_MASK for skill, mask in native.items()
+            if mask & PLAYABLE_RACE_MASK != PLAYABLE_RACE_MASK}
+
+
+def patch_language_abilities(data, languages):
+    """The language spells' SkillLineAbility rows allow every race (race mask 0), as the
+    client only counts a language whose row matches the player's race. Returns
+    (patched data, rows changed)."""
+    dbc = Dbc(SKILL_LINE_ABILITY_DBC, data, SKILL_LINE_ABILITY_FIELDS)
+    changed = sum(dbc.set(row, ABILITY_RACE_MASK, 0) for row in range(dbc.count)
+                  if dbc.get(row, ABILITY_SKILL) in languages)
+    return bytes(dbc.data), changed
+
+
+def patch_language_skill_rows(data, languages):
+    """The race languages' rows for other races (with a skill tier) allow every class and
+    every playable race that is not a native speaker, the same rows the module opens on
+    the server. Native rows stay as they are. Returns (patched data, rows changed)."""
+    dbc = Dbc(SKILL_RACE_CLASS_INFO_DBC, data, SKILL_RACE_CLASS_INFO_FIELDS)
     changed = 0
-    for i in range(record_count):
-        offset = 20 + i * record_size + FACTION_FIELD_OFFSET
-        if struct.unpack_from("<i", patched, offset)[0] != FACTION_BOTH:
-            struct.pack_into("<i", patched, offset, FACTION_BOTH)
-            changed += 1
-    return bytes(patched), changed
+    for row in range(dbc.count):
+        skill = dbc.get(row, INFO_SKILL)
+        if skill in languages and dbc.get(row, INFO_SKILL_TIER):
+            race = dbc.set(row, INFO_RACE_MASK, PLAYABLE_RACE_MASK & ~languages[skill])
+            cls = dbc.set(row, INFO_CLASS_MASK, 0)
+            changed += race or cls
+    return bytes(dbc.data), changed
 
 
 def find_entry(directory, name):
@@ -319,20 +394,39 @@ def find_locales(data_dir):
             if re.fullmatch(r"[a-zA-Z]{4}", entry) and os.path.isdir(os.path.join(data_dir, entry))}
 
 
-PATCH_SUFFIXES = "23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+PATCH_SUFFIXES = "456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 def archives_in_load_order(data_dir, locale, locale_dir):
-    """Every archive name the client loads, lowest priority first, as paths (existing or not).
-    Later archives override earlier ones."""
+    """Every archive the client loads, lowest priority first, as paths. Later archives
+    override earlier ones.
+
+    The 3.3.5a client (12340) finds Data/patch-?.MPQ and Data/<locale>/patch-<locale>-?.MPQ
+    (one character for the ?), sorts them by their path without regard to case, and gives
+    the path that sorts last the highest priority. So every Data/patch-X.MPQ overrides
+    every locale patch. Data/patch.MPQ and Data/<locale>/patch-<locale>.MPQ come below
+    those, and the base archives below them."""
     names = [(data_dir, n) for n in ("common.MPQ", "common-2.MPQ", "expansion.MPQ", "lichking.MPQ")]
     names += [(locale_dir, n % locale) for n in ("locale-%s.MPQ", "speech-%s.MPQ", "expansion-locale-%s.MPQ",
                                                  "lichking-locale-%s.MPQ", "expansion-speech-%s.MPQ",
                                                  "lichking-speech-%s.MPQ")]
-    names += [(data_dir, "patch.MPQ")] + [(data_dir, "patch-%s.MPQ" % s) for s in PATCH_SUFFIXES]
-    names += [(locale_dir, "patch-%s.MPQ" % locale)] + [(locale_dir, "patch-%s-%s.MPQ" % (locale, s)) for s in PATCH_SUFFIXES]
+    names += [(locale_dir, "patch-%s.MPQ" % locale), (data_dir, "patch.MPQ")]
+    paths = [find_entry(directory, name) or os.path.join(directory, name) for directory, name in names]
+    return paths + sorted(wildcard_patches(data_dir, locale, locale_dir), key=lambda path: patch_sort_key(data_dir, path))
 
-    return [find_entry(directory, name) or os.path.join(directory, name) for directory, name in names]
+
+def wildcard_patches(data_dir, locale, locale_dir):
+    """The existing files the client finds with patch-?.MPQ and patch-<locale>-?.MPQ."""
+    found = []
+    for directory, pattern in ((data_dir, r"patch-.\.mpq"), (locale_dir, r"patch-%s-.\.mpq" % re.escape(locale.lower()))):
+        found += [os.path.join(directory, entry) for entry in os.listdir(directory)
+                  if re.fullmatch(pattern, entry.lower()) and os.path.isfile(os.path.join(directory, entry))]
+    return found
+
+
+def patch_sort_key(data_dir, path):
+    """The path the client sorts by (Data\\name or Data\\<locale>\\name), without case."""
+    return ("data\\" + os.path.relpath(path, data_dir).replace(os.sep, "\\")).lower()
 
 
 def is_own_patch(path):
@@ -342,14 +436,23 @@ def is_own_patch(path):
         return False
 
 
+def newest_source(archives, name):
+    """The archive whose copy of the file the client uses, ignoring patches built here."""
+    for path in reversed(archives):
+        if os.path.exists(path) and not is_own_patch(path) and MpqArchive(path).contains(name):
+            return path
+    raise PatchError("no archive in the client contains %s" % name)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Build the optional achievement client patch for mod-crossfactioncities.")
+    parser = argparse.ArgumentParser(description="Build the optional client patch for mod-crossfactioncities.")
     parser.add_argument("client", help="World of Warcraft 3.3.5a folder (the one containing Data and Wow.exe)")
     parser.add_argument("--locale", help="client locale, for example enUS (detected when there is only one)")
-    parser.add_argument("--patch-number", default=DEFAULT_PATCH_NUMBER,
-                        help="patch-<locale>-<N>.MPQ to write, 4-9 or A-Z (default: %(default)s)")
+    parser.add_argument("--patch-number",
+                        help="write Data/patch-<N>.MPQ, 4-9 or A-Z (default: the first free one that "
+                             "overrides every other archive with the same files)")
     parser.add_argument("--check", action="store_true", help="only report what would be done")
-    parser.add_argument("--remove", action="store_true", help="delete the patch this script built")
+    parser.add_argument("--remove", action="store_true", help="delete the patches this script built")
     args = parser.parse_args()
 
     data_dir = find_entry(args.client, "Data")
@@ -365,54 +468,79 @@ def main():
     if locale not in locales:
         raise PatchError("locale %s not found in Data" % locale)
 
-    suffix = args.patch_number.upper()
-    if len(suffix) != 1 or suffix not in PATCH_SUFFIXES[2:]:
-        raise PatchError("--patch-number must be one of 4-9 or A-Z")
-    patch_name = "patch-%s-%s.MPQ" % (locale, suffix)
     archives = archives_in_load_order(data_dir, locale, locales[locale])
-    patch_index = [os.path.basename(path).lower() for path in archives].index(patch_name.lower())
-    patch_path = archives[patch_index]
-    patch_exists = os.path.exists(patch_path)
-
-    if patch_exists and not is_own_patch(patch_path):
-        raise PatchError("%s exists and was not built by this script; choose another --patch-number" % patch_path)
+    own = [path for path in archives if os.path.exists(path) and is_own_patch(path)]
 
     if args.remove:
-        if not patch_exists:
-            print("Nothing to remove: %s does not exist." % patch_path)
-        elif args.check:
-            print("Would remove %s." % patch_path)
-        else:
-            os.remove(patch_path)
-            print("Removed %s." % patch_path)
+        if not own:
+            print("Nothing to remove: no patch built by this script was found.")
+        for path in own:
+            if args.check:
+                print("Would remove %s." % path)
+            else:
+                os.remove(path)
+                print("Removed %s." % path)
         return 0
 
-    # The newest Achievement.dbc the client would load without patches built by this script.
-    source = None
-    for path in reversed(archives):
-        if os.path.exists(path) and not is_own_patch(path) and MpqArchive(path).contains(DBC_PATH):
-            source = path
-            break
-    if not source:
-        raise PatchError("no archive in %s contains %s" % (data_dir, DBC_PATH))
+    sources = {name: newest_source(archives, name) for name in PATCHED_FILES + (SKILL_LINE_DBC,)}
+    # Archives (not built here) whose copy of a patched file the patch has to override.
+    rivals = [path for path in archives
+              if os.path.exists(path) and path not in own and any(MpqArchive(path).contains(n) for n in PATCHED_FILES)]
 
-    # Our patch only wins if no archive loaded after it also carries Achievement.dbc.
-    overriding = [path for path in archives[patch_index + 1:]
-                  if os.path.exists(path) and MpqArchive(path).contains(DBC_PATH)]
+    def candidate(suffix):
+        path = find_entry(data_dir, "patch-%s.MPQ" % suffix) or os.path.join(data_dir, "patch-%s.MPQ" % suffix)
+        overriding = [r for r in rivals if patch_sort_key(data_dir, r) > patch_sort_key(data_dir, path)
+                      and r in wildcard_patches(data_dir, locale, locales[locale])]
+        return path, overriding
 
-    patched, changed = patch_achievement_dbc(MpqArchive(source).read(DBC_PATH))
+    if args.patch_number:
+        suffix = args.patch_number.upper()
+        if len(suffix) != 1 or suffix not in PATCH_SUFFIXES:
+            raise PatchError("--patch-number must be one of 4-9 or A-Z")
+        patch_path, overriding = candidate(suffix)
+        if os.path.exists(patch_path) and patch_path not in own:
+            raise PatchError("%s exists and was not built by this script; choose another --patch-number" % patch_path)
+    else:
+        for suffix in PATCH_SUFFIXES:
+            patch_path, overriding = candidate(suffix)
+            if not overriding and (not os.path.exists(patch_path) or patch_path in own):
+                break
+        else:
+            raise PatchError("no free Data/patch-<N>.MPQ overrides %s; rename one of them or choose --patch-number"
+                             % ", ".join(os.path.basename(r) for r in rivals))
+
+    achievements, achievements_changed = patch_achievements(MpqArchive(sources[ACHIEVEMENT_DBC]).read(ACHIEVEMENT_DBC))
+    languages = race_languages(MpqArchive(sources[SKILL_LINE_DBC]).read(SKILL_LINE_DBC),
+                               MpqArchive(sources[SKILL_RACE_CLASS_INFO_DBC]).read(SKILL_RACE_CLASS_INFO_DBC))
+    abilities, abilities_changed = patch_language_abilities(
+        MpqArchive(sources[SKILL_LINE_ABILITY_DBC]).read(SKILL_LINE_ABILITY_DBC), languages)
+    skill_rows, skill_rows_changed = patch_language_skill_rows(
+        MpqArchive(sources[SKILL_RACE_CLASS_INFO_DBC]).read(SKILL_RACE_CLASS_INFO_DBC), languages)
+
     print("Client: %s (locale %s)" % (args.client, locale))
-    print("Source: %s" % source)
-    print("Achievements set to both factions: %d" % changed)
+    for name in PATCHED_FILES:
+        print("Source of %s: %s" % (name.split("\\")[-1], sources[name]))
+    print("Achievements set to both factions: %d" % achievements_changed)
+    print("Race languages opened to every race and class: %d (%d spell rows, %d skill rows)"
+          % (len(languages), abilities_changed, skill_rows_changed))
     for path in overriding:
-        print("WARNING: %s also contains Achievement.dbc and loads after %s; use a later --patch-number." % (path, patch_name))
+        print("WARNING: %s also contains patched files and overrides %s; leave out --patch-number."
+              % (path, os.path.basename(patch_path)))
+    old = [path for path in own if path != patch_path]
 
     if args.check:
-        print("Check only: %s %s." % (patch_path, "would be replaced" if patch_exists else "would be written"))
+        print("Check only: %s %s." % (patch_path, "would be replaced" if os.path.exists(patch_path) else "would be written"))
+        for path in old:
+            print("Check only: old patch %s would be removed." % path)
         return 0
 
-    write_mpq(patch_path, {DBC_PATH: patched, MARKER_PATH: MARKER_TEXT,
-                           "(listfile)": ("%s\r\n%s\r\n" % (DBC_PATH, MARKER_PATH)).encode("ascii")})
+    files = {ACHIEVEMENT_DBC: achievements, SKILL_LINE_ABILITY_DBC: abilities,
+             SKILL_RACE_CLASS_INFO_DBC: skill_rows, MARKER_PATH: MARKER_TEXT}
+    files["(listfile)"] = "".join(name + "\r\n" for name in files).encode("ascii")
+    write_mpq(patch_path, files)
+    for path in old:
+        os.remove(path)
+        print("Removed old patch %s." % path)
     print("Wrote %s. Restart the client to load it." % patch_path)
     return 0
 

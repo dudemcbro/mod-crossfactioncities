@@ -68,7 +68,7 @@ in the `.conf.dist`.
 | Option | Shipped | What it does |
 | --- | --- | --- |
 | `CrossFactionCities.NeutralInns` | `1` | Players rest in the other faction's inns and rest areas. Restart to change. |
-| `CrossFactionCities.LearnLanguages` | `0` | `0` own race languages only, `1` also the other faction's common language (Orcish or Common), `2` every playable race language. Lowering it removes the extra languages at the next login. Restart to change. |
+| `CrossFactionCities.LearnLanguages` | `0` | `0` own race languages only, `1` also the other faction's common language (Orcish or Common), `2` every playable race language. Lowering it removes the extra languages at the next login. Players need the optional [client patch](client-patch.md) to use the extra languages. Restart to change. |
 | `CrossFactionCities.NpcSpeechUniversal` | `1` | NPC speech and gossip text in a playable race language is sent as Universal, so everyone can read it. |
 
 ### Items and achievements

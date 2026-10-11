@@ -114,6 +114,8 @@ CrossFactionCities.NeutralInns = 1
 # 1 = also the other faction's common language (Orcish for the Alliance, Common for the Horde)
 # 2 = every playable race's language
 # Lowering the value removes the extra languages at the player's next login.
+# The stock client only lets players use their own race's languages; players build an optional
+# patch from their own client with tools/client_patch.py to use the others (docs/client-patch.md).
 # Takes effect after a worldserver restart.
 CrossFactionCities.LearnLanguages = 0
 
@@ -135,6 +137,6 @@ CrossFactionCities.UnlockFactionItems = 0
 # Let players of either faction earn the other faction's achievements. The stock client lists
 # only its own faction's achievements in the achievement window; the server still tracks and
 # awards them. Players can build an optional patch from their own client with
-# tools/achievement_patch.py to list them (docs/client-patch.md).
+# tools/client_patch.py to list them (docs/client-patch.md).
 # Takes effect after a worldserver restart.
 CrossFactionCities.UnlockFactionAchievements = 0

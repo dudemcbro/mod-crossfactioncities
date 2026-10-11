@@ -21,7 +21,7 @@ one. Do not run both on the same server.
 | | mod-Faction-Free | mod-crossfactioncities |
 | --- | --- | --- |
 | **How it installs** | Replace `Achievement.dbc`, `Faction.dbc` and `FactionTemplate.dbc`, replace `PlayerUpdates.cpp` in the core, run SQL | A normal module in `modules/`, plus small core patches applied with `git apply` |
-| **Client patch** | Yes, `Patch-F.mpq` for every player | No; one optional patch for the achievement window, built by each player from their own client |
+| **Client patch** | Yes, `Patch-F.mpq` for every player | Optional; one patch for the achievement window and the extra languages, built by each player from their own client |
 | **Other requirements** | mod-eluna, for the teleporter Lua scripts | None |
 | **Where the factions get along** | Everywhere, permanently | Cities, towns and the zones you list, or everywhere (`OnlyInCities = 0`) |
 | **Enemy NPCs** | Friendly (DBC edits, and some NPCs moved to the Stormwind or Orgrimmar faction in `creature_template`) | Neutral by default, so quest targets stay killable; friendly with `NpcReactionRank = 4` |
@@ -31,7 +31,7 @@ one. Do not run both on the same server.
 | **Reputation** | Reputation with the other faction's factions (DBC changes) | Unchanged by default; `AllowHostileQuestReputation` for quest reputation |
 | **Quests** | `AllowableRaces` opened for single-faction quests | `AllowableRaces` opened for all quests, with a backup table and a restore script |
 | **Inns** | `areatrigger_tavern` changed so every inn is for both factions | `NeutralInns`, no database change |
-| **Languages** | `playercreateinfo_skills` changed so new characters get every language | `LearnLanguages` 0, 1 or 2, for new and existing characters, and removed again when lowered |
+| **Languages** | `playercreateinfo_skills` changed so new characters get every language | `LearnLanguages` 0, 1 or 2, for new and existing characters, and removed again when lowered; players use them with the optional patch they build from their own client |
 | **NPC speech** | `broadcast_text`, `creature_text` and `npc_text` languages set to Universal | `NpcSpeechUniversal`, by editing the packets as they are sent |
 | **Faction-locked items** | `item_template` faction flags and race masks cleared | `UnlockFactionItems`, in memory |
 | **Achievements** | Achievement.dbc on server and client (shipped in the client patch), so they show in the achievement window | `UnlockFactionAchievements` on the server; shown in the achievement window only with the optional patch players build from their own client |
@@ -47,7 +47,8 @@ one. Do not run both on the same server.
   achievement window needs a patched client Achievement.dbc. Faction-Free ships one in
   `Patch-F.mpq`, which every player must install. This module tracks and awards them
   with stock clients, and offers an optional patch that each player builds from their
-  own client with `tools/achievement_patch.py` (see [client-patch.md](client-patch.md)).
+  own client with `tools/client_patch.py` (see [client-patch.md](client-patch.md)). The
+  same patch lets the client use the languages `LearnLanguages` gives.
 - **Data edits vs. runtime:** Faction-Free's SQL changes stay in your world database.
   Updating the core's world database can bring back original rows, and the changes
   have to be reapplied. This module's changes are made again at every startup.

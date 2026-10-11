@@ -3,8 +3,9 @@
 This page explains what the module changes inside the server for each feature. Every
 feature works on the server side only: no DBC files and no database tables are changed
 (apart from the optional quest SQL in
-[installation.md](installation.md#database-setup)), and the one client patch is
-optional ([client-patch.md](client-patch.md)).
+[installation.md](installation.md#database-setup)). The one client patch is optional; it
+lets the client list the other faction's achievements and use the extra languages
+([client-patch.md](client-patch.md)).
 
 The module changes two kinds of things:
 
@@ -104,14 +105,14 @@ Languages are skills. The core keeps a table (SkillRaceClassInfo.dbc) of which r
 classes may have each skill, and it deletes a skill from a character at login when no row
 allows it. Each language has two kinds of rows: one for its native speakers, and one that
 lets the other races hold it as a learned skill. The stock rows for other races leave out
-Death Knights, and Thalassian's also lists Blood Elves, so the core's lookup for a Blood
-Elf can land on either row.
+Death Knights, Common's also leaves out Undead, and Thalassian's also lists Blood Elves,
+so the core's lookup for a Blood Elf can land on either row.
 
 - At startup the module finds the playable race languages: the language skills some race
   gets at character creation (`playercreateinfo_skills`). They are Common, Orcish,
   Darnassian, Dwarvish, Gnomish, Draenei, Taurahe, Gutterspeak, Troll and Thalassian.
 - For the languages the option grants, it opens their "other races" rows to every class
-  and limits them to the races that are not native speakers, in the server's loaded copy
+  and to every playable race that is not a native speaker, in the server's loaded copy
   of the DBC. Native speakers keep using their own row.
 - At every login it gives the player each granted language (skill and spell) and removes
   the languages their race does not speak natively and the option does not grant.
@@ -123,6 +124,14 @@ Elf can land on either row.
 | `0` | nothing | nothing |
 | `1` | Orcish | Common |
 | `2` | every playable race language | every playable race language |
+
+The client makes the same check from its own copies of `SkillLineAbility.dbc` and
+`SkillRaceClassInfo.dbc`: it only offers a language in the chat menu, lets the player
+speak it and understands it when the language spell's row matches the player's race and
+a skill row matches the race and class. The stock files tie each language spell to its
+native races, so players need the optional client patch ([client-patch.md](client-patch.md))
+to use the languages the server gives them. Without it the languages show in the skill
+window, and nothing else changes.
 
 Player chat between factions is a separate core option:
 `AllowTwoSide.Interaction.Chat = 1` in `worldserver.conf` sends all player chat as
@@ -174,7 +183,7 @@ The stock client reads its own Achievement.dbc to build the achievement window, 
 lists only the player's own faction's achievements there. Achievements of the other
 faction are still earned and saved, and the server sends the usual "achievement earned"
 message, but they do not show in that window unless the player installs the optional
-patch from `tools/achievement_patch.py` ([client-patch.md](client-patch.md)), which marks
+patch from `tools/client_patch.py` ([client-patch.md](client-patch.md)), which marks
 every achievement as both factions in the client's copy.
 
 ## Startup-only options

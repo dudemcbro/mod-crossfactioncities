@@ -3,9 +3,9 @@
 An [AzerothCore](https://www.azerothcore.org/) (WotLK 3.3.5a) module that lets the
 Alliance and the Horde share the world. Cities become neutral ground, and optional
 features remove faction limits from inns, languages, NPC speech, items and achievements.
-Everything runs on the server: players use a stock client, and no DBC files or database
-tables are changed. The only client patch is optional and built by each player from
-their own client.
+Everything runs on the server and no DBC files or database tables are changed. The only
+client patch is optional and built by each player from their own client; it is needed to
+list the other faction's achievements and to use the extra languages.
 
 ## Features
 
@@ -18,7 +18,8 @@ their own client.
 - **Quests and reputation:** take the other faction's quests (optional SQL) and earn
   quest reputation with hostile factions (option).
 - **Inns:** rest in the other faction's inns and rest areas.
-- **Languages:** learn the other faction's language, or every race language.
+- **Languages:** learn the other faction's language, or every race language (players
+  need the optional client patch to use them).
 - **NPC speech:** NPC chat and gossip text readable by everyone.
 - **Faction-locked items:** faction mounts, PvP gear and quest items for everyone.
 - **Achievements:** either faction can earn the other faction's achievements, with an
@@ -50,7 +51,7 @@ quest SQL and uninstalling are in [docs/installation.md](docs/installation.md).
 | [Configuration](docs/configuration.md) | Every option, when changes apply, example setups |
 | [How it works](docs/how-it-works.md) | What each feature changes inside the server |
 | [Compatibility](docs/compatibility.md) | Client cache, worldserver.conf settings, other modules |
-| [Achievement client patch](docs/client-patch.md) | The optional patch that shows the other faction's achievements |
+| [Client patch](docs/client-patch.md) | The optional patch for the other faction's achievements and the extra languages |
 | [Testing](docs/testing.md) | The live server test and the client patch test |
 | [Compared with mod-Faction-Free](docs/comparison-faction-free.md) | How the two modules differ and which one to choose |
 | [Core patches](patches/NOTE.md) | What each patch adds and how to check it against your core |
@@ -61,8 +62,9 @@ quest SQL and uninstalling are in [docs/installation.md](docs/installation.md).
 friendly everywhere by replacing DBC files, patching every client and rewriting world
 database tables. This module does it at runtime instead: per area, feature by feature,
 with stock clients, and it can be switched off again without restoring backups. The
-other faction's achievements need an optional patch, which each player builds from their
-own client, to show in the achievement window, and there is no teleport network. See the
+other faction's achievements (in the achievement window) and the extra languages need an
+optional patch, which each player builds from their own client, and there is no teleport
+network. See the
 [full comparison](docs/comparison-faction-free.md).
 
 ## Contributing

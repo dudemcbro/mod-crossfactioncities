@@ -19,10 +19,10 @@
     list for faction-locked taxi nodes. It relies on the taxi hook patch, so apply that
     one first.
 
-No client changes are needed. Players only need to clear their client's `Cache` folder
-after you turn on `NpcSpeechUniversal` or `UnlockFactionItems`. With
-`UnlockFactionAchievements`, players can optionally build a patch from their own client
-so the other faction's achievements show in the achievement window
+Players only need to clear their client's `Cache` folder after you turn on
+`NpcSpeechUniversal` or `UnlockFactionItems`. With `UnlockFactionAchievements` or
+`LearnLanguages`, players build the optional patch from their own client so the other
+faction's achievements show in the achievement window and the extra languages can be used
 ([client-patch.md](client-patch.md)).
 
 ## Steps

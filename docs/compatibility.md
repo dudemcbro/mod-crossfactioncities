@@ -16,17 +16,19 @@
 
 ## Client
 
-- No client patch is needed for any feature. The optional achievement patch
-  ([client-patch.md](client-patch.md)) only adds the other faction's achievements to the
-  achievement window.
+- Two features need the optional client patch ([client-patch.md](client-patch.md)) to
+  show in the client: the other faction's achievements in the achievement window
+  (`UnlockFactionAchievements`), and the extra languages in the chat menu
+  (`LearnLanguages`). Everything else works with a stock client.
 - Clients cache item data and gossip text. After turning on `UnlockFactionItems` or
   `NpcSpeechUniversal`, players should delete the client's `Cache` folder, or tooltips
   and gossip text they have already seen stay as they were.
 - The stock client lists only its own faction's achievements in the achievement window.
   With `UnlockFactionAchievements` the other faction's achievements are still tracked,
   earned and saved, and the server sends the usual "achievement earned" message, but
-  they stay hidden in that window unless the player installs the optional achievement
-  patch.
+  they stay hidden in that window unless the player installs the optional client patch.
+- With `LearnLanguages` the stock client still only offers the player's own race
+  languages; the optional client patch lets it use the others.
 - Some clients hide faction-locked taxi nodes entirely (for example the Azuremyst and
   Bloodmyst flight points for Horde). If the flight map is empty there, apply the
   gossip fallback patch.
