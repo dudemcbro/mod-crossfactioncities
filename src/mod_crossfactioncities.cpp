@@ -642,9 +642,10 @@ namespace
 
     // The core drops a skill at login when no SkillRaceClassInfo row allows it for the
     // character's race and class. The rows for other races already exist, but leave out
-    // Death Knights, and Thalassian's also lists Blood Elves, which makes the core's lookup
-    // for them ambiguous. So the other-race rows of the granted languages are opened to
-    // every class and limited to the races that are not native speakers.
+    // Death Knights, Common's leaves out Undead, and Thalassian's also lists Blood Elves,
+    // which makes the core's lookup for them ambiguous. So the other-race rows of the
+    // granted languages are opened to every class and to every playable race that is not
+    // a native speaker.
     void ApplyLanguageSkillRows()
     {
         uint32 changed = 0;
@@ -659,7 +660,7 @@ namespace
                 if (entry->SkillID != language.skillId || !entry->SkillTierID)
                     continue;
 
-                uint32 races = (entry->RaceMask ? entry->RaceMask : sPlayableRaceMask) & ~language.dbcNativeRaceMask;
+                uint32 races = sPlayableRaceMask & ~language.dbcNativeRaceMask;
                 if (!races)
                     continue;
 

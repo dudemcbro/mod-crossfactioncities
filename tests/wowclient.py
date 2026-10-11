@@ -23,6 +23,8 @@ SMSG_CHAR_CREATE = 0x03A
 SMSG_CHAR_ENUM = 0x03B
 CMSG_PLAYER_LOGIN = 0x03D
 SMSG_NEW_WORLD = 0x03E
+CMSG_LOGOUT_REQUEST = 0x04B
+SMSG_LOGOUT_COMPLETE = 0x04D
 CMSG_ITEM_QUERY_SINGLE = 0x056
 SMSG_ITEM_QUERY_SINGLE_RESPONSE = 0x058
 CMSG_MESSAGECHAT = 0x095
@@ -30,6 +32,7 @@ SMSG_MESSAGECHAT = 0x096
 MSG_MOVE_TELEPORT_ACK = 0x0C7
 MSG_MOVE_WORLDPORT_ACK = 0x0DC
 CMSG_AUTOEQUIP_ITEM = 0x10A
+SMSG_INITIAL_SPELLS = 0x12A
 SMSG_INVENTORY_CHANGE_FAILURE = 0x112
 CMSG_NPC_TEXT_QUERY = 0x17F
 SMSG_NPC_TEXT_UPDATE = 0x180
@@ -355,6 +358,20 @@ class WorldClient:
         self.pump(wait)
         return [parse_chat(data)[3] for _, opcode, data in self.packets[start:]
                 if opcode == SMSG_MESSAGECHAT and data[0] == CHAT_MSG_SYSTEM]
+
+    def logout(self):
+        """Logs the character out (GM accounts log out at once) and closes the connection."""
+        self.send(CMSG_LOGOUT_REQUEST)
+        self.wait_for(SMSG_LOGOUT_COMPLETE, 25)
+        self.close()
+
+    def initial_spells(self):
+        """Spell IDs from the SMSG_INITIAL_SPELLS packet of the last login."""
+        for _, opcode, data in reversed(self.packets):
+            if opcode == SMSG_INITIAL_SPELLS:
+                count = struct.unpack_from("<H", data, 1)[0]
+                return {struct.unpack_from("<I", data, 3 + i * 6)[0] for i in range(count)}
+        return set()
 
     def received(self, opcode, since=0.0):
         return [data for when, got, data in self.packets if got == opcode and when >= since]

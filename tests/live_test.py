@@ -176,7 +176,7 @@ class Character:
     def logout(self):
         if self.client:
             self.save()
-            self.client.close()
+            self.client.logout()
             self.client = None
 
     def skills(self):
@@ -262,6 +262,16 @@ def phase_a(ctx, ally, horde):
     print("\n== Phase A: every option on, LearnLanguages = 2")
     lines = ctx.start_world()
     ctx.check(any("LearnLanguages=2" in l for l in lines), "startup applied LearnLanguages")
+
+    # Common's stock row for other races leaves out Undead: without the module's row the
+    # core drops the language at every login and the module has to add it back.
+    undead = Character(ctx, horde.account, "Cfu" + horde.name[3:], 5, wc.LANG_ORCISH)   # undead warrior
+    undead.login(create=True)
+    undead.logout()
+    undead.login()
+    ctx.check(LANGUAGE_SPELLS[98] in undead.client.initial_spells(),
+              "Undead character still has Common at its next login")
+    undead.logout()
 
     ally.login(create=True)
     horde.login(create=True)
