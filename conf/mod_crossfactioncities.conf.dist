@@ -134,5 +134,7 @@ CrossFactionCities.UnlockFactionItems = 0
 
 # Let players of either faction earn the other faction's achievements. The stock client lists
 # only its own faction's achievements in the achievement window; the server still tracks and
-# awards them. Takes effect after a worldserver restart.
+# awards them. Players can build an optional patch from their own client with
+# tools/achievement_patch.py to list them (docs/client-patch.md).
+# Takes effect after a worldserver restart.
 CrossFactionCities.UnlockFactionAchievements = 0
