@@ -51,7 +51,14 @@ PHASES = {
     "A": {"NeutralInns": 1, "LearnLanguages": 2, "NpcSpeechUniversal": 1, "UnlockFactionItems": 1, "UnlockFactionAchievements": 1},
     "B": {"NeutralInns": 0, "LearnLanguages": 1, "NpcSpeechUniversal": 0, "UnlockFactionItems": 0, "UnlockFactionAchievements": 0},
     "C": {"NeutralInns": 0, "LearnLanguages": 0, "NpcSpeechUniversal": 0, "UnlockFactionItems": 0, "UnlockFactionAchievements": 0},
+    "D": {"NeutralInns": 0, "LearnLanguages": 2, "NpcSpeechUniversal": 0, "UnlockFactionItems": 0, "UnlockFactionAchievements": 0},
+    "E": {"NeutralInns": 0, "LearnLanguages": 0, "NpcSpeechUniversal": 0, "UnlockFactionItems": 0, "UnlockFactionAchievements": 0},
 }
+
+# Phases D and E add playercreateinfo_skills rows that give every playable race every language at
+# creation, as some servers do, and remove them again at the end.
+EVERY_RACE_MASK = 1791
+CREATE_SKILL_COMMENT = "cfc-live-test"
 
 
 class Context:
@@ -399,12 +406,49 @@ def phase_c(ctx, ally, horde):
     ctx.stop_world()
 
 
+def set_creation_languages(ctx, every_race):
+    ctx.sql(ctx.args.world_db, "DELETE FROM playercreateinfo_skills WHERE comment = '%s'" % CREATE_SKILL_COMMENT)
+    if every_race:
+        values = ", ".join("(%d, 0, %d, 0, '%s')" % (EVERY_RACE_MASK, skill, CREATE_SKILL_COMMENT) for skill in LANGUAGE_SKILLS)
+        ctx.sql(ctx.args.world_db, "INSERT INTO playercreateinfo_skills (raceMask, classMask, skill, `rank`, comment) VALUES " + values)
+
+
+def phase_d(ctx, ally, horde):
+    print("\n== Phase D: every race gets every language at creation, LearnLanguages = 2")
+    set_creation_languages(ctx, True)
+    ctx.start_world()
+    ally.login()
+    horde.login()
+    ally.save()
+    horde.save()
+    # The characters were created before the rows existed and only know their own language.
+    ctx.check(set(LANGUAGE_SKILLS) <= ally.skills(), "existing Alliance character learns every race language",
+              sorted(set(LANGUAGE_SKILLS) - ally.skills()))
+    ctx.check(set(LANGUAGE_SKILLS) <= horde.skills(), "existing Horde character learns every race language",
+              sorted(set(LANGUAGE_SKILLS) - horde.skills()))
+    ally.logout()
+    horde.logout()
+    ctx.stop_world()
+
+
+def phase_e(ctx, ally, horde):
+    print("\n== Phase E: every race gets every language at creation, LearnLanguages = 0")
+    ctx.start_world()
+    ally.login()
+    ally.save()
+    ctx.check(set(LANGUAGE_SKILLS) <= ally.skills(), "languages the race gets at creation are kept",
+              sorted(set(LANGUAGE_SKILLS) - ally.skills()))
+    ally.logout()
+    ctx.stop_world()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--server-dir", required=True, help="folder with bin/ and etc/ of the dev server")
     parser.add_argument("--mysql", default="mysql", help='mysql client command with credentials (default: "%(default)s")')
     parser.add_argument("--auth-db", default="acore_auth")
     parser.add_argument("--char-db", default="acore_characters")
+    parser.add_argument("--world-db", default="acore_world")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--auth-port", type=int, default=3724)
     parser.add_argument("--world-port", type=int, default=8085)
@@ -423,11 +467,12 @@ def main():
             ctx.ensure_account(account)
         ally = Character(ctx, "CFCTESTA", "Cfa" + suffix, 1, wc.LANG_COMMON)    # human warrior
         horde = Character(ctx, "CFCTESTH", "Cfh" + suffix, 2, wc.LANG_ORCISH)   # orc warrior
-        for name, phase in (("A", phase_a), ("B", phase_b), ("C", phase_c)):
+        for name, phase in (("A", phase_a), ("B", phase_b), ("C", phase_c), ("D", phase_d), ("E", phase_e)):
             ctx.set_options(PHASES[name])
             phase(ctx, ally, horde)
     finally:
         ctx.stop_world()
+        set_creation_languages(ctx, False)
         shutil.move(backup, ctx.module_conf)
 
     failed = [label for ok, label in ctx.results if not ok]

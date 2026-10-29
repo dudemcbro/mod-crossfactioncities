@@ -6,7 +6,7 @@ The module has two test scripts. Both need only Python 3.8 or newer.
 
 `tests/live_test.py` checks the features on a running dev server with a headless
 client (`tests/wowclient.py`), so no game client is needed. It starts the worldserver
-three times with different options, logs in an Alliance and a Horde character and checks
+five times with different options, logs in an Alliance and a Horde character and checks
 what the server sends and saves.
 
 | Phase | Options | What it checks |
@@ -14,6 +14,8 @@ what the server sends and saves.
 | A | every option on, `LearnLanguages = 2` | an Undead character keeps Common at its next login; GM commands work; new characters keep their own language and learn every other one; a Horde-only item is unlocked in the item query and can be equipped by an Alliance character; a Horde-only achievement is earned; an Alliance character rests in a Horde inn; Orcish gossip text and a Stormwind NPC's Common greeting arrive as Universal; Stormwind's NPCs are neutral to a Horde character; `.reload config` switches `NpcSpeechUniversal` off |
 | B | startup options off, `NpcSpeechUniversal = 0`, `LearnLanguages = 1` | only the other faction's common language is kept and the other languages lose their skill and spell; the item is Horde-only again and cannot be equipped; a second Horde-only achievement is not earned; no rest in another Horde inn; gossip text and the greeting keep their language |
 | C | `LearnLanguages = 0` | characters are back to their own language only |
+| D | `playercreateinfo_skills` gives every race every language, `LearnLanguages = 2` | the characters created in phase A, which only know their own language now, learn every race language at login |
+| E | as D, `LearnLanguages = 0` | languages the race gets at creation are kept |
 
 ### Running it
 
@@ -23,6 +25,8 @@ Use a dev server, never a live realm. The script:
 - creates two new characters on each run,
 - edits `etc/modules/mod_crossfactioncities.conf` while it runs and restores it at the
   end,
+- adds rows marked `cfc-live-test` to the world database's `playercreateinfo_skills` for
+  phases D and E and deletes them at the end,
 - starts the authserver if it is not running, and starts and stops the worldserver
   itself (stop your worldserver first).
 
@@ -33,8 +37,8 @@ python3 tests/live_test.py --server-dir /path/to/azerothcore/env/dist
 `--server-dir` is the folder with `bin/worldserver`, `bin/authserver` and `etc/`. The
 script reads and writes the databases with the `mysql` command line client; pass
 credentials with `--mysql`, for example `--mysql "mysql -h 127.0.0.1 -u acore -pacore"`.
-`--auth-db`, `--char-db`, `--host`, `--auth-port` and `--world-port` change the defaults
-(`acore_auth`, `acore_characters`, `127.0.0.1`, 3724, 8085).
+`--auth-db`, `--char-db`, `--world-db`, `--host`, `--auth-port` and `--world-port` change
+the defaults (`acore_auth`, `acore_characters`, `acore_world`, `127.0.0.1`, 3724, 8085).
 
 The server needs the stock world database (the test uses the Razor Hill and Crossroads
 inns, npc_text 34, item 15197, the Stormwind greeter 28347 and the Mag'har and Warsong

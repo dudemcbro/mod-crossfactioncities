@@ -118,6 +118,10 @@ so the core's lookup for a Blood Elf can land on either row.
   the languages their race does not speak natively and the option does not grant.
   Lowering `LearnLanguages` and restarting therefore takes the languages away again at
   the players' next login.
+- A native speaker here is a race in the language's native DBC row. Some servers change
+  `playercreateinfo_skills` so every race gets every language at creation; characters
+  created before that change still learn the granted languages at login, and the module
+  never removes a language the character's race gets at creation.
 
 | `LearnLanguages` | Alliance players also learn | Horde players also learn |
 | --- | --- | --- |

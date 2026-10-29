@@ -679,7 +679,9 @@ namespace
     }
 
     // Grants the languages the options allow and removes other languages the player's race
-    // does not speak, so lowering LearnLanguages takes them away again.
+    // does not speak, so lowering LearnLanguages takes them away again. A language the race
+    // only gets from playercreateinfo_skills (servers that give every race every language at
+    // creation) is still granted to characters created before that, and is never removed.
     void UpdateLanguages(Player* player)
     {
         uint32 raceMask = player->getRaceMask();
@@ -687,10 +689,14 @@ namespace
 
         for (PlayerLanguage const& language : sPlayerLanguages)
         {
-            if (language.nativeRaceMask & raceMask)
+            if (language.dbcNativeRaceMask & raceMask)
                 continue;
 
-            if (IsLanguageGranted(language, team))
+            bool granted = IsLanguageGranted(language, team);
+            if (!granted && (language.nativeRaceMask & raceMask))
+                continue;
+
+            if (granted)
             {
                 if (!player->HasSkill(language.skillId))
                     player->SetSkill(language.skillId, 0, 300, 300);
