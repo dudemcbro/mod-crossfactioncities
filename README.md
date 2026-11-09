@@ -36,7 +36,6 @@ git clone https://github.com/dudemcbro/mod-crossfactioncities.git
 cd <azerothcore>
 modules/mod-crossfactioncities/patches/apply-core-gameobject-faction-hook.sh
 modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-hook.sh
-modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-gossip-fallback.sh
 ```
 
 Re-run CMake, rebuild, copy `etc/modules/mod_crossfactioncities.conf.dist` to

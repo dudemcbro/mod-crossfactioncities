@@ -69,9 +69,7 @@ itself keeps its faction on the server.
 `core-taxi-crossfaction-hook.patch` lets the nearest taxi node lookup and the mount
 selection use the other faction's nodes and mounts when
 `AllowTwoSide.Interaction.Group = 1`. Some clients hide faction-locked nodes (a
-`MountCreatureID` of 0 for one faction) and show an empty flight map;
-`core-taxi-crossfaction-gossip-fallback.patch` adds a gossip list of destinations for
-that case.
+`MountCreatureID` of 0 for one faction) and show an empty flight map there.
 
 ## Quests and reputation
 
