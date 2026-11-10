@@ -30,8 +30,7 @@
 - With `LearnLanguages` the stock client still only offers the player's own race
   languages; the optional client patch lets it use the others.
 - Some clients hide faction-locked taxi nodes entirely (for example the Azuremyst and
-  Bloodmyst flight points for Horde). If the flight map is empty there, apply the
-  gossip fallback patch.
+  Bloodmyst flight points for Horde), so the flight map there can be empty.
 
 ## worldserver.conf
 

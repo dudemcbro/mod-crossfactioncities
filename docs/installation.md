@@ -15,9 +15,6 @@
     module still builds, but the gameobject part of `NeutralMailboxes` and all of
     `NeutralGameObjects` silently do nothing.
   - `core-taxi-crossfaction-hook.patch`: cross-faction taxi node and mount selection.
-  - `core-taxi-crossfaction-gossip-fallback.patch` (optional): the gossip destination
-    list for faction-locked taxi nodes. It relies on the taxi hook patch, so apply that
-    one first.
 
 Players only need to clear their client's `Cache` folder after you turn on
 `NpcSpeechUniversal` or `UnlockFactionItems`. With `UnlockFactionAchievements` or
@@ -41,7 +38,6 @@ faction's achievements show in the achievement window and the extra languages ca
    cd <azerothcore>
    modules/mod-crossfactioncities/patches/apply-core-gameobject-faction-hook.sh
    modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-hook.sh
-   modules/mod-crossfactioncities/patches/apply-core-taxi-crossfaction-gossip-fallback.sh
    ```
 
    See [patches/NOTE.md](../patches/NOTE.md) for how to check the patches against
@@ -101,7 +97,6 @@ An option missing from your config uses the value shipped in the `.conf.dist`.
 3. Reverse the core patches you applied, from the core root:
 
    ```sh
-   git apply -R modules/mod-crossfactioncities/patches/core-taxi-crossfaction-gossip-fallback.patch
    git apply -R modules/mod-crossfactioncities/patches/core-taxi-crossfaction-hook.patch
    git apply -R modules/mod-crossfactioncities/patches/core-gameobject-faction-hook.patch
    ```
