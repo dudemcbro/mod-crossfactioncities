@@ -1,11 +1,18 @@
 # mod-crossfactioncities
 
+<img src="icon.png" alt="" width="64" align="right">
+
 An [AzerothCore](https://www.azerothcore.org/) (WotLK 3.3.5a) module that lets the
 Alliance and the Horde share the world. Cities become neutral ground, and optional
 features remove faction limits from inns, languages, NPC speech, items and achievements.
 Everything runs on the server and no DBC files or database tables are changed. The only
 client patch is optional and built by each player from their own client; it is needed to
 list the other faction's achievements and to use the extra languages.
+
+- **Author:** [dudemcbro](https://github.com/dudemcbro)
+- **License:** [GNU AGPL v3.0](LICENSE)
+- **Works with:** AzerothCore `master` and the mod-playerbots fork (WoW 3.3.5a), with
+  two small core patches ([details](docs/installation.md#requirements))
 
 ## Features
 
@@ -44,7 +51,7 @@ quest SQL and uninstalling are in [docs/installation.md](docs/installation.md).
 
 ## Documentation
 
-| Page | Contents |
+| Page | What's in it |
 | --- | --- |
 | [Installation](docs/installation.md) | Requirements, core patches, database setup, updating, uninstalling |
 | [Configuration](docs/configuration.md) | Every option, when changes apply, example setups |
@@ -88,6 +95,6 @@ with `git apply --check` from a clean core checkout.
 
 ## License
 
-GNU Affero General Public License v3.0, see [LICENSE](LICENSE). If you run a
+Licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE). If you run a
 modified version of this module on a server that players connect to, you must offer
 those players the source code of your version.
